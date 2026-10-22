@@ -1,8 +1,11 @@
+##########################################
+
 ### Construction of initial states
 
+############################################
 
 function binom(k, n)
-
+    """Compute binomial coefficients"""
     j = min(k, n-k)
     res = 0
     for i in 1:j
