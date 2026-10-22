@@ -1,5 +1,8 @@
 # QSqueeG
 
+Welcome to the Quantum Squeezing for Gravity project!
+
+
 Julia package. Install in development mode:
 
 ```julia
