@@ -1,0 +1,15 @@
+name = "QSqueeG"
+uuid = "5b1e3a7c-2f4d-4c8e-9a61-7d0f3b8e2c14"
+authors = ["Dario Cafasso", "Youssef Trifa"]
+version = "0.1.0"
+
+[deps]
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
