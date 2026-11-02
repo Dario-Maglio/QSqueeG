@@ -36,7 +36,6 @@
 // ============================================================================
 #include <cmath>        // std::sqrt, std::cos, std::pow, std::lgamma, ...
 #include <complex>      // std::complex<double>, std::polar, std::norm
-#include <algorithm>    // std::min, std::max
 
 #include <Eigen/Dense>  // Eigen::VectorXcd, Eigen::VectorXd, Eigen::Array, ...
 
@@ -54,10 +53,6 @@ namespace spin {        // everything we write lives in the namespace "spin"
 // Short alias: a complex number made of two doubles.
 using Complex = std::complex<double>;
 
-// Short alias: a spin vector = <J^mu> with mu = 0,x,y,z.
-// Eigen::Vector4d has its size FIXED at compile time (no memory allocation).
-//using SpinVector = Eigen::Vector4d;
-
 // Short alias: a column of booleans whose size is chosen at run time.
 // Array instead of Vector: it is a plain table, no linear algebra.
 using BoolArray = Eigen::Array<bool, Eigen::Dynamic, 1>;
@@ -70,8 +65,13 @@ using RealVector = Eigen::VectorXd;
 // Eigen::VectorXcd = complex<double> vector whose size is chosen at run time.
 using StateVector = Eigen::VectorXcd;
 
+// Short alias: a real matrix (e.g. a function sampled on a grid).
+using RealMatrix = Eigen::MatrixXd;
+
 // Short alias: a complex N x N matrix (e.g. a rotation or evolution operator).
 using Matrix = Eigen::MatrixXcd;
+
+
 
 
 
@@ -80,7 +80,7 @@ using Matrix = Eigen::MatrixXcd;
 //  Class Qudit
 // ============================================================================
 //  a.) Constructor
-//        Qudit(N, init = "CSS+Z")         N = 2J+1; init = named state (see below)
+//        Qudit(N, init="CSS+Z")           N = 2J+1; init = named state (see below)
 //
 //  b.) State preparations  (overwrite the state, return *this for chaining)
 //        prepareNamed(label)              "CSS+Z", "CSS-Z", "CSS+X", "CSS-X", "CSS+Y", "CSS-Y"
@@ -92,16 +92,18 @@ using Matrix = Eigen::MatrixXcd;
 //
 //  c.) Getters  (read-only, const)
 //        dim(), spinJ(), spinM(k)         N, J, and m = J - k
-//        state(), amplitude(k), norm()    state vector, single amplitude, Euclidean norm
+//        state(), norm(), amplitude(k)    state vector, Euclidean norm, single amplitude
+//        overlapCSS(theta, phi)           single amplitude with the corresponding CSS
 //        avgSx(), avgSy(), avgSz()        first moments <S_a>
 //        avgSplus(), avgSminus()          <S_+>, <S_->
 //        avgSx2(), avgSy2(), avgSz2()     second moments <S_a^2>
 //        avgSplus2()                      <S_+^2>
-//        varSx(), varSy(), varSz()        variances Var(S_a) = <S_a^2> - <S_a>^2
+//        varSx(), varSy(), varSz()        variances ||(S_a - <S_a>) psi||^2
+//        husimiQ(ntheta=61, nphi=121)     Husimi Q function as a ntheta x nphi matrix
 //
 //  d.) Modifiers  (change the state, return *this for chaining)
 //        normalize()                      rescale to unit norm
-//        setState(v, normalizeIt = true)  replace the state with a given vector
+//        setState(v, normalizeIt=true)    replace the state with a given vector
 //        applyPulseZ(phi)                 exp(-i phi S_z), exact for multiples of pi/2
 //        applyPulseXPi(), applyPulseYPi() exact pi pulses (vector reversal)
 //        applyPulseXPiHalf()              pi/2 pulse about x  (uses Dy_ and two z pulses)
@@ -111,16 +113,18 @@ using Matrix = Eigen::MatrixXcd;
 //        evolve(E, P, t)                  exp(-i H t) for H = P diag(E) P^dagger
 //
 //  e.) Input / output
-//        printSpin(name = "qudit")        norm, <S_a> and Var(S_a) for a = x, y, z
+//        printSpin(name="qudit")          norm, <S_a> and Var(S_a) for a = x, y, z
 //        save(fileName), load(fileName)   plain text file, full double precision
 //
 //  f.) Private data members and helpers
 //        N_, psi_, Dy_                    dimension, state, Wigner matrix exp(-i pi/2 S_y)
+//        kPrecision_                      precision required by the save and load methods
 //        phase_, kPi_, kHeader_           powers of i, pi, data file header
-//        checkIndex(k)                    throws if k is not in 0..N-1
-//        Cplus(J, m), Cminus(J, m)        ladder matrix elements of S_+ and S_-
+//        Cplus(J, m), Cmnus(J, m)         ladder matrix elements of S_+ and S_-
 //        logSqrtBinomial(n, k)            log sqrt(C(n, k)), stable for large n
-//        buildDy()                        Risbo recursion for d^J(pi/2)
+//        deviationNorm2(axis)             compute the variance for axis=1,2,3
+//        cssModuli(theta)                 compute the modulus of CSS amplitudes
+//        buildDy()                        ladder recurrence for d^J(pi/2)
 // ============================================================================
 class Qudit {
 public:
@@ -144,9 +148,8 @@ public:
     // ------------------------------------------------------------------------
     
     // The "explicit" forbids silent conversions. The member initialiser 
-    // list ( : N_(N), psi_(...) ) initialises the data members first.
-    // StateVector::Zero(n) creates a vector of n zeros. (Careful: with Eigen,
-    // StateVector(n, value) would NOT mean "n copies of value".)
+    // list ( : N_(N), psi_(...), ... ) initialises the data members first.
+    // StateVector::Zero(n) creates a vector of n zeros.
     explicit Qudit(int N, const std::string& init = "CSS+Z")
         : N_(N), psi_(StateVector::Zero(N > 0 ? N : 0)) {
         // Check the physical size N.
@@ -183,7 +186,7 @@ public:
     // 0 <= k <= N-1.  k = 0 gives |J,J>, k = N-1 gives |J,-J>.
     Qudit& prepareDickeZ(int k) {
         // Check that k is a valid spin k = J - m.
-        checkIndex(k);
+        if (k < 0 || k >= N_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
         // Set every amplitude to 0...
         psi_.setZero();
         // ... and put a single 1 at position k.
@@ -204,54 +207,37 @@ public:
         return prepareDickeX(k).applyPulseZ(kPi_ / 2); 
     }
 
-    // Coherent Spin State (CSS) |theta, phi>, 
-    // i.e. the spin fully polarised along the unit vector
-    //
+    // Coherent Spin State (CSS) |theta, phi>, fully polarised along the unit vector
     //      n = (sin(theta) cos(phi), sin(theta) sin(phi), cos(theta)).
-    //
-    // Angles are in radians: theta in [0, pi] (polar), phi in [0, 2pi)
-    // (azimuthal). Explicitly, with k = J - m:
-    //
-    //   <J,m|theta,phi> = sqrt( C(2J, k) ) cos(theta/2)^(2J-k)
-    //                                       sin(theta/2)^k  exp(i k phi)
-    //
-    // where C(2J,k) is the binomial coefficient. This is the state obtained
-    // by rotating |J,J> so that <S_n> = J. It is normalised by construction.
+    // Angles are in radians: theta in [0, pi] (polar), phi in [0, 2pi) (azimuthal).
     Qudit& prepareCSS(double theta, double phi) {
-        // Check the polar angle is between zero and pi.
-        if (theta < 0. || theta > kPi_) throw std::invalid_argument("Qudit: invalid angle theta.");
-
-        const int twoJ = N_ - 1;                  // 2J, an integer
-        const double c = std::cos(0.5 * theta);   // cos(theta/2)
-        const double s = std::sin(0.5 * theta);   // sin(theta/2)        
-
-        for (int k = 0; k < N_; k++) {
-            // Real modulus: sqrt(C(2J,k)) cos^(2J-k) sin^k.
-            double logMod = logSqrtBinomial(twoJ, k);
-            // Manage the edges to avoid NaN.
-            if (k > 0)        logMod += k * std::log(s);
-            if (twoJ - k > 0) logMod += (twoJ - k) * std::log(c);
-            // Phase exp(i k phi), built with std::polar(r, angle) = r e^{i angle}.
-            psi_(k) = std::polar(std::exp(logMod), k * phi);
-        }
+        // Explicitly, with k = J - m, we have:
+        //   <J,m|theta,phi> = sqrt( C(2J, k) ) cos(theta/2)^(2J-k)
+        //                                      sin(theta/2)^k  exp(i k phi)
+        // where C(2J,k) is the binomial coefficient. This is the state obtained
+        // by rotating |J,J> so that <S_n> = J. It is normalised by construction.
+        const RealVector r = cssModuli(theta);
+        // Moduli r times the phases exp(i k phi) with std::polar(r, angle).
+        for (int k = 0; k < N_; k++) psi_(k) = std::polar(r(k), k * phi);
         return *this;
     }
 
     // CSS on the equator (theta = pi/2) with phi = q * pi/2:
     //   q = 0 -> +X,  q = 1 -> +Y,  q = 2 -> -X,  q = 3 -> -Y.
-    // Amplitudes: sqrt( C(2J,k) / 2^(2J) ) * i^(q k).
-    // The phases i^(qk) are taken from a table, so they are EXACT
-    // (no sin/cos of pi, hence no 1e-16 spurious real/imaginary parts).
+    // Avoids numerical errors of prepareCSS for these states.
     Qudit& prepareEquatorialCSS(int q) {
         // Check the q value is valid.
         if (q < 0 || q > 3) throw std::invalid_argument("Qudit: unknown equatorial preparation.");
         const int twoJ = N_ - 1;
-        // Compute the amplitudes.
-        for (int k = 0; k < N_; k++) {
-            const int kk = std::min(k, twoJ - k); 
-            // Modulus is computed once per symmetric pair |psi_k| == |psi_{2J-k}|.
-            const double modulus = std::exp(logSqrtBinomial(twoJ, kk) - 0.5 * twoJ * std::log(2.0));
-            psi_(k) = modulus * phase_[(q * k) % 4];
+        // Compute log of 2^J, the same for every k.
+        const double logNorm = 0.5 * twoJ * std::log(2.0);
+        // Compute the amplitudes in a symmetric way.
+        for (int k = 0; k <= twoJ / 2; k++) {
+            const double modulus = std::exp(logSqrtBinomial(twoJ, k) - logNorm);
+            // The phases i^(qk) are taken from a table, so they are EXACT
+            // (no sin/cos of pi, hence no 1e-16 spurious real/imaginary parts).
+            psi_(k)        = modulus * phase_[(q * k) % 4];
+            psi_(twoJ - k) = modulus * phase_[(q * (twoJ - k)) % 4];
         }
         return *this;
     }
@@ -278,8 +264,24 @@ public:
 
     // Single amplitude <J, J-k | psi>, with bounds checking.
     Complex amplitude(int k) const {
-        checkIndex(k);
+        if (k < 0 || k >= N_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
         return psi_(k);
+    }
+
+    // Single amplitude <theta, phi | psi>, with checks on theta in cssModuli.
+    Complex overlapCSS(double theta, double phi) const {
+        // Compute r_k = |<J,J-k|theta,phi>|, which only depends on theta.
+        const RealVector r = cssModuli(theta); 
+        // The sum is a polynomial in z = exp(-i phi):  sum_k r_k psi_k z^k.  
+        // Horner's rule counts from the highest power down, with b_k = r_k psi_k:
+        //         overlap = b_0 + z (b_1 + z (b_2 + ...))  
+        // only N multiplications and additions, no powers z^k and no sin/cos.
+        const Complex z = std::polar(1.0, -phi);
+        // Define b_{N-1} as...
+        Complex overlap = r(N_ - 1) * psi_(N_ - 1);
+        // ... and iterate until k=0.
+        for (int k = N_ - 2; k >= 0; k--) overlap = overlap * z + r(k) * psi_(k);
+        return overlap;
     }
 
     // Compute the expectation value of S^plus = S^x + i S^y.
@@ -294,7 +296,7 @@ public:
     Complex avgSminus() const {
         const double J = spinJ();
         Complex sMinus(0.0, 0.0);
-        for (int k = 0; k < N_ - 1; k++) sMinus += std::conj(psi_(k + 1)) * Cminus(J, spinM(k)) * psi_(k);
+        for (int k = 0; k < N_ - 1; k++) sMinus += std::conj(psi_(k + 1)) * Cmnus(J, spinM(k)) * psi_(k);
         return sMinus;
     }
 
@@ -305,15 +307,9 @@ public:
     // Compute the expectation value of S^z.
     double avgSz() const {
         double sz = 0.0;
-        for (int k = 0; k < N_; k++) sz += spinM(k) * std::norm(psi_(k));
+        // Symmetric evaluation helps against rounding errors.
+        for (int k = 0; k < N_ / 2; k++) sz += spinM(k) * (std::norm(psi_(k)) - std::norm(psi_(N_ - 1 - k)));
         return sz;
-    }
-
-    // Compute <S_z^2> = sum_m m^2 |psi_m|^2.
-    double avgSz2() const {
-        double sz2 = 0.0;
-        for (int k = 0; k < N_; k++) sz2 += spinM(k) * spinM(k) * std::norm(psi_(k));
-        return sz2;
     }
 
     // Compute <S_+^2> = sum_m conj(psi_{m+2}) <J,m+2|S_+|J,m+1><J,m+1|S_+|J,m> psi_m.
@@ -335,22 +331,50 @@ public:
         const double J = spinJ();
         return 0.5 * (J * (J + 1) * psi_.squaredNorm() - avgSz2() - avgSplus2().real());
     }
-
-    // Variances Var(S_a) = <S_a^2> - <S_a>^2 (for a normalised state).
-    double varSx() const { 
-        const double s = avgSx(); 
-        return std::max(0.0, avgSx2() - s * s);
-    }
-    double varSy() const { 
-        const double s = avgSy(); 
-        return std::max(0.0, avgSy2() - s * s); 
-    }
-    double varSz() const { 
-        const double s = avgSz(); 
-        return std::max(0.0, avgSz2() - s * s); 
+    
+    // Compute <S_z^2> = sum_m m^2 |psi_m|^2.
+    double avgSz2() const {
+        double sz2 = 0.0;
+        for (int k = 0; k < N_; k++) sz2 += spinM(k) * spinM(k) * std::norm(psi_(k));
+        return sz2;
     }
 
+    // Variances computed as a sum of squares:  Var(S_a) = || (S_a - <S_a>) psi ||^2.
+    // The mean is subtracted BEFORE squaring, so no large numbers cancel: the result is never
+    // negative and has no rounding noise of order J^2 * 1e-16 (unlike <S_a^2> - <S_a>^2).
+    double varSx() const { return deviationNorm2(1); }
+    double varSy() const { return deviationNorm2(2); }
+    double varSz() const { return deviationNorm2(3); }
 
+
+    // Husimi Q function on a (theta, phi) grid, for plotting the state on the Bloch sphere:
+    RealMatrix husimiQ(int nTheta=61, int nPhi=121) const {
+        // Check the grid dimension is valid.
+        if (nTheta < 2 || nPhi < 2) throw std::invalid_argument("Qudit::husimiQ: the grid needs at least 2 x 2 points");
+        // Compute Q(theta, phi) = |<theta, phi | psi>|^2, with
+        //     theta_i = pi * i / (nTheta - 1),   i = 0 .. nTheta-1   (from +z, theta = 0, to -z, theta = pi),
+        //     phi_j   = 2 pi * j / (nPhi - 1),   j = 0 .. nPhi-1     (the last j gives 2pi to close the sphere).
+        // Values of Q in [0, 1]: (2J+1)/(4 pi) ∫ Q(theta,phi) sin(theta) dtheta dphi = 1.
+        RealMatrix Q(nTheta, nPhi);
+        for (int i = 0; i < nTheta; i++) {
+            // Compute r_k = |<J,J-k|theta,phi>|, which only depends on theta.
+            const RealVector r = cssModuli(kPi_ * i / (nTheta - 1));
+            for (int j = 0; j < nPhi; j++) {
+                const Complex z = std::polar(1.0, -2.0 * kPi_ * j / (nPhi - 1));
+                // To compute sum_k b_k z^k with with b_k = r_k psi_k and z = exp(-i phi_j),
+                // we use Horner's rule as in overlapCSS. First, define b_{N-1} as...
+                Complex overlap = r(N_ - 1) * psi_(N_ - 1);
+                // ... and then iterate until k=0.
+                for (int k = N_ - 2; k >= 0; k--) overlap = overlap * z + r(k) * psi_(k);
+                // This gives the point (i,j) on the grid as:
+                Q(i, j) = std::norm(overlap);
+            }
+        }
+        // Check the normalization over the Bloch sphere with:
+        //     1 approx C sum_{i=0}^{ntheta-1} sin(theta_i) sum_{j=0}^{nphi−2} Q_{i,j}
+        // where C = (2J+1)pi / (2(ntheta−1)(nphi−1)), and we neglect the last j.
+        return Q;
+    }
 
 
 
@@ -445,7 +469,6 @@ public:
     // Evolve for a time t under a Hamiltonian DIAGONAL in the S_z basis:
     //     psi_k -> exp(-i E_k t) psi_k,   with E_k = <J,J-k| H |J,J-k>.
     // energies : the N diagonal elements E_k of H, in the same order as psi_.
-    // Exact for any t (no time step); the norm is preserved.
     Qudit& evolveDiagonal(const RealVector& energies, double t) {
         // Check the size of energies.
         if (energies.size() != N_) throw std::invalid_argument("Qudit::evolveDiagonal: number of energies differs from N");
@@ -479,7 +502,6 @@ public:
         //         <Sx> = 0         Var(Sx) = 10
         //         <Sy> = 0         Var(Sy) = 10
         //         <Sz> = 20        Var(Sz) = 0
-        //
         // The number format follows the stream settings chosen by the caller,
         // e.g. std::cout << std::fixed << std::setprecision(4) before calling it.
         std::cout << name << " :  <psi|psi> = " << psi_.squaredNorm() << "\n"
@@ -494,25 +516,22 @@ public:
         std::ofstream out(fileName);  
         // ... and check everything went smooth.
         if (!out) throw std::runtime_error("Qudit::save: cannot open \"" + fileName + "\"");
-
-        // Write 17 significant digits: enough to read back exactly the same.
-        out.precision(17);
+        // Write kPrecision_ significant digits: enough to read back exactly the same.
+        out.precision(kPrecision_);
         // Format (human readable):
-        //
         //     # spin::Qudit state: N 6
         //     # k   Re(psi_k)   Im(psi_k)
         //     0  0.17677669529663687  0
         //     1  0.39528470752104744  0
         //     ...
-        //
+        // Change precision when changing format!
         out << kHeader_ << N_ << "\n";
         out << "# k   Re(psi_k)   Im(psi_k)\n";
         for (int k = 0; k < N_; k++) {
             const Complex& a = psi_(k);
             out << k << "  " << a.real() << "  " << a.imag() << "\n";
         }
-        out.close();  // flushes the buffer to disk and closes the file
-
+        out.close();
         // Check if any error occurred while writing or closing.
         if (!out) throw std::runtime_error("Qudit::save: error while writing \"" + fileName + "\"");
     }
@@ -598,6 +617,9 @@ private:
 
     Matrix Dy_;        // Wigner matrix Dy_ = exp(-i pi/2 S_y)
 
+    // Significant digits written by save(): 17 are enough to get the same double.
+    static constexpr int kPrecision_ = 17;
+
      // Powers of i: i^0, i^1, i^2, i^3 (exact phases for multiples of pi/2).
     static constexpr Complex phase_[4] = {Complex(1, 0), Complex(0, 1), Complex(-1, 0), Complex(0, -1)};
 
@@ -607,19 +629,13 @@ private:
     // Header for data files
     static inline const std::string kHeader_ = "# spin::Qudit state: N ";
 
-    // Throws std::out_of_range if k is not a valid basis index.
-    void checkIndex(int k) const {
-        // The message is built inside throw: only when the error happens, not at every call.
-        if (k < 0 || k >= N_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
-    }
-
     // Matrix element of the raising operator: <J,m+1| S_+ |J,m> = sqrt( J(J+1) - m(m+1)).
     static double Cplus(double J, double m) {
         return std::sqrt(J * (J + 1) - m * (m + 1));
     }
 
     // Matrix element of the lowering operator: <J,m-1| S_- |J,m> = sqrt( J(J+1) - m(m-1)).
-    static double Cminus(double J, double m) {
+    static double Cmnus(double J, double m) {
         return std::sqrt(J * (J + 1) - m * (m - 1));
     }
 
@@ -635,39 +651,97 @@ private:
                     - std::lgamma(n - k + 1.0));
     }
 
-    // Wigner matrix Dy_ = exp(-i pi/2 S_y), i.e. the rotation by pi/2 about y, with elements
-    //     Dy_(k', k) = d^J_{m'm}(pi/2) = <J,m'| exp(-i pi/2 S_y) |J,m>,   m' = J - k',  m = J - k.
-    // It depends only on N: built once in the constructor. Memory: 16 N^2 bytes.
-    // Build d^J(pi/2) with the exact recursion in J (Risbo's recursion).
-    // (The closed Wigner formula is an alternating sum that loses all digits for N ~ 100.)
-    // A spin J = n/2 is the symmetric state of n spins 1/2. Adding one spin 1/2 to a spin (n-1)/2,
-    //     |n/2, a> = sqrt((n-a)/n) |(n-1)/2, a>|up> + sqrt(a/n) |(n-1)/2, a-1>|down>,   a = J - m,
-    // and rotating each spin 1/2 with d^{1/2}(pi/2) = [[c, -s], [s, c]], c = s = 1/sqrt(2), gives
-    //     d^{(n)}(a',a) = [ sqrt((n-a')(n-a)) c d^{(n-1)}(a',  a  ) - sqrt((n-a') a) s d^{(n-1)}(a',  a-1)
-    //                     + sqrt(a'(n-a))    s d^{(n-1)}(a'-1,a  ) + sqrt(a' a)    c d^{(n-1)}(a'-1,a-1) ] / n.
-    // Start from d^{(0)} = (1) (spin 0) and repeat up to n = N-1. No cancellations: accuracy ~1e-13.
-    // Cost O(N^3): ~0.02 s for N = 200, ~2 s for N = 1000.
-    Matrix buildDy() const {
-        // Table of square roots sqrt(0), ..., sqrt(N), used by every step.
-        RealVector sq(N_ + 1);
-        for (int i = 0; i <= N_; i++) sq(i) = std::sqrt(static_cast<double>(i));
-
-        Eigen::MatrixXd d = Eigen::MatrixXd::Ones(1, 1);   // spin 0: d = (1)
-        for (int n = 1; n < N_; n++) {                       // from spin (n-1)/2 to spin n/2
-            Eigen::MatrixXd next = Eigen::MatrixXd::Zero(n + 1, n + 1);
-            const double c = std::sqrt(0.5) / n;             // cos(pi/4) / n = sin(pi/4) / n
-            // Each old element d(a, b) contributes to its 4 neighbours in the new matrix.
-            // (b is the outer loop: Eigen stores matrices by columns, so a runs through memory.)
-            for (int b = 0; b < n; b++) for (int a = 0; a < n; a++) {
-                const double t = c * d(a, b);
-                next(a, b)         += sq(n - a) * sq(n - b) * t;   // up   -> up   :  +cos
-                next(a, b + 1)     -= sq(n - a) * sq(b + 1) * t;   // down -> up   :  -sin
-                next(a + 1, b)     += sq(a + 1) * sq(n - b) * t;   // up   -> down :  +sin
-                next(a + 1, b + 1) += sq(a + 1) * sq(b + 1) * t;   // down -> down :  +cos
+    // || (S_a - <S_a>) psi ||^2 for a = 1 (x), 2 (y), 3 (z), without building any matrix.
+    // (S_+ psi)_k = Cplus(J, m_{k+1}) psi_{k+1}   (S_+ raises m: takes index k+1 to k),
+    // (S_- psi)_k = Cmnus(J, m_{k-1}) psi_{k-1}  (S_- lowers m: takes index k-1 to k),
+    // S_x = (S_+ + S_-)/2,   S_y = (S_+ - S_-)/(2i),   S_z diagonal with entries m.
+    double deviationNorm2(int axis) const {
+        const double J = spinJ();
+        const double mean = (axis == 1) ? avgSx() : (axis == 2) ? avgSy() : avgSz();
+        double sum = 0.0;
+        for (int k = 0; k < N_; k++) {
+            // Define the k-component of S_a psi.
+            Complex Spsi(0.0, 0.0);
+            if (axis == 3) {
+                Spsi = spinM(k) * psi_(k);
+            } else {
+                // Manage the edges while computing S_+ psi and S_- psi.
+                const Complex down = (k > 0)      ? Cmnus(J, spinM(k - 1)) * psi_(k - 1) : Complex(0.0, 0.0);
+                const Complex up   = (k + 1 < N_) ? Cplus(J, spinM(k + 1)) * psi_(k + 1) : Complex(0.0, 0.0);
+                // Compute the S_x or S_y k-component...
+                Spsi = (axis == 1) ? 0.5 * (up + down) : Complex(0.0, -0.5) * (up - down);
             }
-            d.swap(next);
+            // ... and subtract the average as |((S_a - <S_a>) psi)_k|^2.
+            sum += std::norm(Spsi - mean * psi_(k));
         }
-        return d.cast<Complex>();   // d^J(pi/2) is real; stored as complex to be used with applyRotation
+        return sum;
+    }
+
+    // Moduli of the coherent spin state amplitudes:
+    //      |<J,m|theta,phi>| = sqrt(C(2J,k)) cos(theta/2)^(2J-k) sin(theta/2)^k,
+    // with k = J - m, computed through logarithms (no overflow for large J).
+    RealVector cssModuli(double theta) const {
+        // Check the polar angle is between zero and pi (otherwise cos(theta/2) < 0 and its log is NaN).
+        if (theta < 0. || theta > kPi_) throw std::invalid_argument("Qudit: invalid angle theta.");
+        const int twoJ = N_ - 1;                  // 2J, an integer
+        const double c = std::cos(0.5 * theta);   // cos(theta/2)
+        const double s = std::sin(0.5 * theta);   // sin(theta/2)
+        RealVector r(N_);
+        for (int k = 0; k < N_; k++) {
+            double logMod = logSqrtBinomial(twoJ, k);
+            // Manage the edges to avoid 0 * log(0) = NaN at the poles.
+            if (k > 0)        logMod += k * std::log(s);
+            if (twoJ - k > 0) logMod += (twoJ - k) * std::log(c);
+            r(k) = std::exp(logMod);
+        }
+        return r;
+    }
+
+    // Wigner matrix Dy_ = exp(-i pi/2 S_y): rotation by pi/2 about y, built once in the constructor.
+    //     Dy_(a, k) = <J,m_a| exp(-i pi/2 S_y) |J,m_k>,   m_a = J - a,  m_k = J - k   (real numbers).
+    // Cost O(N^2), memory 16 N^2 bytes, accuracy ~1e-15 (N = 801: 2.5e-15), valid for N <= 2045.
+    Matrix buildDy() const {
+        const int twoJ = N_ - 1;
+        const double J = spinJ();
+        // The smallest number used below is 2^-J: it must be a normal double, i.e. J <= 1022.
+        if (twoJ / 2 > 1022) throw std::invalid_argument("Qudit: N > 2045 is too large for the double-precision Dy");
+        
+        // Edge rows. Their moduli are known in closed form (as for the equatorial CSS):
+        //     D(0, k) = (-1)^k e_k,   D(2J, k) = e_k,   e_k = sqrt(C(2J,k)) / 2^J.
+        // e_k is built as a product, e_k = e_{k-1} sqrt((2J-k+1)/k), from e_0 = 2^-J 
+        // given exactly by std::ldexp(x, n) = x * 2^n. This is the reason for J <= 1022.
+        RealVector e(N_);
+        e(0) = std::ldexp(twoJ % 2 == 1 ? std::sqrt(0.5) : 1.0, -(twoJ / 2));
+        // 2^-J = x * 2^-floor(J), x = sqrt(1/2) for half-integer J, 1 for integer J.
+        for (int k = 1; k <= twoJ / 2; k++) e(k) = e(k - 1) * std::sqrt((twoJ - k + 1) / static_cast<double>(k));
+        for (int k = 0; k <= twoJ / 2; k++) e(twoJ - k) = e(k);      // symmetry e_k = e_{2J-k}
+        // Through logSqrtBinomial, the 1e-16 * lgamma(2J) ~ 1e-13 error of the exponent would become 1e-13 after exp.
+
+        // Inner rows: Dy rotates S_z into S_x, i.e. S_x Dy = Dy S_z, so column k is the eigenvector of S_x
+        // with eigenvalue m_k (the Dicke state |J, m_k>_x). S_x only couples rows a and a+1, through
+        // <J,m_a|S_+|J,m_a - 1> = Cmnus(J, m_a), which gives a three-term recurrence for each column:
+        //     ( Cmnus(J, m_{a-1}) D(a-1,k) + Cmnus(J, m_a) D(a+1,k) ) / 2 = m_k D(a,k).
+        // It is run INWARD from both edges (the stable direction: near the edges each column grows inward),
+        // and the two halves meet in the middle row.
+        RealMatrix D(N_, N_);
+        const int mid = twoJ / 2;                   // rows 0..mid from the top, mid+1..2J from the bottom
+        for (int k = 0; k < N_; k++) {
+            const double m = spinM(k);
+            D(0, k)    = (k % 2 == 0) ? e(k) : -e(k);
+            D(twoJ, k) = e(k);
+            // From the top:     D(a+1) = ( 2 m D(a) - Cmnus(J, m_{a-1}) D(a-1) ) / Cmnus(J, m_a)
+            for (int a = 0; a < mid; a++) {
+                const double above = (a > 0) ? Cmnus(J, spinM(a - 1)) * D(a - 1, k) : 0.0;
+                D(a + 1, k) = (2 * m * D(a, k) - above) / Cmnus(J, spinM(a));
+            }
+            // From the bottom:  D(a-1) = ( 2 m D(a) - Cmnus(J, m_a) D(a+1) ) / Cmnus(J, m_{a-1})
+            for (int a = twoJ; a > mid + 1; a--) {
+                const double below = (a < twoJ) ? Cmnus(J, spinM(a)) * D(a + 1, k) : 0.0;
+                D(a - 1, k) = (2 * m * D(a, k) - below) / Cmnus(J, spinM(a - 1));
+            }
+        }
+        // d^J(pi/2) is real; stored as complex to be used with applyRotation.
+        return D.cast<Complex>();
     }
 };
 

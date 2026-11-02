@@ -1,4 +1,4 @@
-// g++ -std=c++17 -I/usr/include/eigen3 test_eigen.cpp -o test.out
+// g++ -std=c++17 -I/usr/include/eigen3 test_eigen.cpp -o eigen.out
 
 #include <Eigen/Dense>
 #include <iostream>

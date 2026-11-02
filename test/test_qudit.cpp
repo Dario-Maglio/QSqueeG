@@ -1,10 +1,10 @@
 // ============================================================================
-//  main.cpp  --  test of spin::Qudit
-//  Build:  g++ -std=c++17 -Wall -Wextra -O2 -isystem /usr/include/eigen3 main.cpp -o qudit_demo.out
+//  qudit_test.cpp  --  test of spin::Qudit
+//  Build:  g++ -std=c++17 -Wall -Wextra -O2 -isystem /usr/include/eigen3 test_qudit.cpp -o qudit_demo.out
 //  Run:    ./qudit_demo.out
 // ============================================================================
 
-#include "qudit.hpp"
+#include "../src_cpp/qudit.hpp"
 
 #include <cmath>
 #include <cstdio>     // std::remove
@@ -85,8 +85,8 @@ int main() {
 
     // 8) Errors are reported with exceptions.
     try { spin::Qudit(N + 3).load("q_test.txt"); } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
-    try { spin::Qudit(N, "CSS+W");                } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
-    try { q.prepareDickeZ(N);                     } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
+    try { spin::Qudit(N, "CSS+W");               } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
+    try { q.prepareDickeZ(N);                    } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
 
     std::remove("q_test.txt");
     return 0;
