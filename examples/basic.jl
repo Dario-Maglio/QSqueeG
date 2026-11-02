@@ -1,3 +1,0 @@
-using QSqueeG
-
-println(hello())
