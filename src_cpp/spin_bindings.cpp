@@ -42,6 +42,7 @@ PYBIND11_MODULE(spinlib, m) {
         .def("prepareDickeZ",        &Qudit::prepareDickeZ,        py::arg("k"),           self)
         .def("prepareDickeX",        &Qudit::prepareDickeX,        py::arg("k"),           self)
         .def("prepareDickeY",        &Qudit::prepareDickeY,        py::arg("k"),           self)
+        .def("prepareReference",     &Qudit::prepareReference,                             self)
         .def("prepareCSS",           &Qudit::prepareCSS,           py::arg("theta"), py::arg("phi"), self)
         .def("prepareEquatorialCSS", &Qudit::prepareEquatorialCSS, py::arg("q"),           self)
 
@@ -53,29 +54,21 @@ PYBIND11_MODULE(spinlib, m) {
         .def("norm",       &Qudit::norm)
         .def("amplitude",  &Qudit::amplitude, py::arg("k"))
         .def("overlapCSS", &Qudit::overlapCSS, py::arg("theta"), py::arg("phi"))
-        .def("avgSplus",   &Qudit::avgSplus)
-        .def("avgSminus",  &Qudit::avgSminus)
-        .def("avgSx",      &Qudit::avgSx)
-        .def("avgSy",      &Qudit::avgSy)
-        .def("avgSz",      &Qudit::avgSz)
-        .def("avgSx2",     &Qudit::avgSx2)
-        .def("avgSy2",     &Qudit::avgSy2)
-        .def("avgSz2",     &Qudit::avgSz2)
-        .def("avgSplus2",  &Qudit::avgSplus2)
-        .def("varSx",      &Qudit::varSx)
-        .def("varSy",      &Qudit::varSy)
-        .def("varSz",      &Qudit::varSz)
+        .def("avgSpin",    &Qudit::avgSpin)   // NumPy array: <S_x>, <S_y>, <S_z>
+        .def("covSpin",    &Qudit::covSpin)   // NumPy 3 x 3 array: covariances
         .def("husimiQ",    &Qudit::husimiQ, py::arg("nTheta") = 61, py::arg("nPhi") = 121)
 
         // d.) Modifiers
         .def("normalize",         &Qudit::normalize,         self)
         .def("setState",          &Qudit::setState,          py::arg("amplitudes"), py::arg("normalizeIt") = true, self)
+        .def("applyRotation",     &Qudit::applyRotation,     py::arg("U"), self)        
         .def("applyPulseZ",       &Qudit::applyPulseZ,       py::arg("phi"), self)
+        .def("applyPulseX",       &Qudit::applyPulseX,       py::arg("phi"), self)
+        .def("applyPulseY",       &Qudit::applyPulseY,       py::arg("phi"), self)
         .def("applyPulseXPi",     &Qudit::applyPulseXPi,     self)
         .def("applyPulseYPi",     &Qudit::applyPulseYPi,     self)
         .def("applyPulseXPiHalf", &Qudit::applyPulseXPiHalf, self)
         .def("applyPulseYPiHalf", &Qudit::applyPulseYPiHalf, self)
-        .def("applyRotation",     &Qudit::applyRotation,     py::arg("U"), self)
         .def("evolveDiagonal",    &Qudit::evolveDiagonal,    py::arg("energies"), py::arg("t"), self)
         .def("evolve",            &Qudit::evolve,            py::arg("E"), py::arg("P"), py::arg("t"), self)
 

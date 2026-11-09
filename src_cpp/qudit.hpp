@@ -71,6 +71,10 @@ using RealMatrix = Eigen::MatrixXd;
 // Short alias: a complex N x N matrix (e.g. a rotation or evolution operator).
 using Matrix = Eigen::MatrixXcd;
 
+// Short aliases: a real 3-vector and a real 3 x 3 matrix, one entry per axis x, y, z
+using Vector3 = Eigen::Vector3d;
+using Matrix3 = Eigen::Matrix3d;
+
 
 
 
@@ -87,6 +91,7 @@ using Matrix = Eigen::MatrixXcd;
 //        prepareDickeZ(k)                 |J,m>   along z,  m = J - k
 //        prepareDickeX(k)                 |J,m>_x along x,  m = J - k
 //        prepareDickeY(k)                 |J,m>_y along y,  m = J - k
+//        prepareReference()               reference state |o> = sum_m |J,m>_y / sqrt(2J+1)
 //        prepareCSS(theta, phi)           coherent spin state along (theta, phi)
 //        prepareEquatorialCSS(q)          CSS along +x, +y, -x, -y for q = 0, 1, 2, 3 (exact phases)
 //
@@ -94,21 +99,20 @@ using Matrix = Eigen::MatrixXcd;
 //        dim(), spinJ(), spinM(k)         N, J, and m = J - k
 //        state(), norm(), amplitude(k)    state vector, Euclidean norm, single amplitude
 //        overlapCSS(theta, phi)           single amplitude with the corresponding CSS
-//        avgSx(), avgSy(), avgSz()        first moments <S_a>
-//        avgSplus(), avgSminus()          <S_+>, <S_->
-//        avgSx2(), avgSy2(), avgSz2()     second moments <S_a^2>
-//        avgSplus2()                      <S_+^2>
-//        varSx(), varSy(), varSz()        variances ||(S_a - <S_a>) psi||^2
+//        avgSpin()                        mean spin vector (<S_x>, <S_y>, <S_z>)
+//        covSpin()                        3 x 3 covariance matrix, variances on the diagonal
 //        husimiQ(ntheta=61, nphi=121)     Husimi Q function as a ntheta x nphi matrix
 //
 //  d.) Modifiers  (change the state, return *this for chaining)
 //        normalize()                      rescale to unit norm
 //        setState(v, normalizeIt=true)    replace the state with a given vector
-//        applyPulseZ(phi)                 exp(-i phi S_z), exact for multiples of pi/2
-//        applyPulseXPi(), applyPulseYPi() exact pi pulses (vector reversal)
-//        applyPulseXPiHalf()              pi/2 pulse about x  (uses Dy_ and two z pulses)
-//        applyPulseYPiHalf()              pi/2 pulse about y  (uses Dy_)
 //        applyRotation(U)                 psi -> U psi, U unitary N x N
+//        applyPulseZ(phi)                 exp(-i phi S_z), exact for multiples of pi/2
+//        applyPulseX(phi)                 exp(-i phi S_x), uses Dy_ twice and one z pulse
+//        applyPulseY(phi)                 exp(-i phi S_y), applyPulseX between two z pulses
+//        applyPulseXPi(), applyPulseYPi() exact pi pulses (vector reversal)
+//        applyPulseXPiHalf()              pi/2 pulse about x, uses Dy_ and two z pulses
+//        applyPulseYPiHalf()              pi/2 pulse about y, just applyRotation(Dy_)
 //        evolveDiagonal(E, t)             exp(-i H t) for H diagonal in S_z, diagonal entries E
 //        evolve(E, P, t)                  exp(-i H t) for H = P diag(E) P^dagger
 //
@@ -122,7 +126,7 @@ using Matrix = Eigen::MatrixXcd;
 //        phase_, kPi_, kHeader_           powers of i, pi, data file header
 //        Cplus(J, m), Cmnus(J, m)         ladder matrix elements of S_+ and S_-
 //        logSqrtBinomial(n, k)            log sqrt(C(n, k)), stable for large n
-//        deviationNorm2(axis)             compute the variance for axis=1,2,3
+//        applyS(axis)                     S_a psi for axis = 1, 2, 3 (x, y, z)
 //        cssModuli(theta)                 compute the modulus of CSS amplitudes
 //        buildDy()                        ladder recurrence for d^J(pi/2)
 // ============================================================================
@@ -182,8 +186,9 @@ public:
         throw std::invalid_argument("Qudit: unknown initial state \"" + label + "\".");
     }
 
-    // Dicke state |J, m> along z, selected by its INDEX k = J - m, with
-    // 0 <= k <= N-1.  k = 0 gives |J,J>, k = N-1 gives |J,-J>.
+    // Dicke state |J, m>, with m = J - k for 0 <= k <= N-1.  
+    // Applying Jplus = Jx + i Jy sends k to k - 1.
+    // Setting k = 0 gives |J,J>, k = N-1 gives |J,-J>.
     Qudit& prepareDickeZ(int k) {
         // Check that k is a valid spin k = J - m.
         if (k < 0 || k >= N_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
@@ -191,20 +196,38 @@ public:
         psi_.setZero();
         // ... and put a single 1 at position k.
         psi_(k) = Complex(1.0, 0.0);
-        // return the object itself (allows chaining)
+        // Return the object itself (allows chaining)
         return *this;  
     }
 
-    // Dicke state |J,m_x> along x in the computational basis.
-    Qudit& prepareDickeX(int k) { 
-        // Just rotate DickeZ around the Y axis by PiHalf.
-        return prepareDickeZ(k).applyPulseYPiHalf(); 
+    // Dicke state |J,m>_x, with m = J - k in the cyclic frame (y, z, x):
+    // Applying Jplus_(x) = Jy + i Jz sends k to k - 1.
+    Qudit& prepareDickeX(int k) {
+        prepareDickeZ(k);
+        // Apply pi/2 pulse about z, i.e. phase i^k on |J,J-k>... 
+        psi_(k) = phase_[k % 4];
+        // ... then a pi/2 pulse about y.
+        return applyPulseYPiHalf();
     }
     
-    // Dicke state |J,m_y> along y in the computational basis.
-    Qudit& prepareDickeY(int k) { 
-        // Further rotate DickeX around the Z axis by PiHalf.
-        return prepareDickeX(k).applyPulseZ(kPi_ / 2); 
+    // Dicke state |J,m>_y, with m = J - k and phases in the cyclic frame (z, x, y):
+    // Applying Jplus_(y) = Jz + i Jx sends k to k - 1.
+    Qudit& prepareDickeY(int k) {
+        prepareDickeZ(k);
+        // Apply pi pulse about z, i.e. phase (-1)^k = i^(2k) on |J,J-k>...
+        psi_(k) = phase_[(2 * k) % 4];
+        // ... then a pi/2 pulse about y and a pi/2 pulse about z.
+        return applyPulseYPiHalf().applyPulseZ(kPi_ / 2);
+    }
+
+    // Reference state of the qudit ruler: |o> = sum_m |J,m>_y / sqrt(2J+1).
+    // Its mean spin points to +z, with <S_z>/J -> pi/4 for large J.
+    Qudit& prepareReference() {
+        const double amplitude = 1.0 / std::sqrt(static_cast<double>(N_));
+        // Signed sum of the z Dicke states: phase (-1)^k = i^(2k), as in prepareDickeY...
+        for (int k = 0; k < N_; k++) psi_(k) = amplitude * phase_[(2 * k) % 4];
+        // ... then a pi/2 pulse about y and a pi/2 pulse about z.
+        return applyPulseYPiHalf().applyPulseZ(kPi_ / 2);
     }
 
     // Coherent Spin State (CSS) |theta, phi>, fully polarised along the unit vector
@@ -284,67 +307,31 @@ public:
         return overlap;
     }
 
-    // Compute the expectation value of S^plus = S^x + i S^y.
-    Complex avgSplus() const {
+    // Mean spin vector (<S_x>, <S_y>, <S_z>).
+    Vector3 avgSpin() const {
         const double J = spinJ();
+        // <S_+> = <S_x> + i <S_y>, with S_+ taking index k to k - 1 (m to m + 1).
         Complex sPlus(0.0, 0.0);
-        for (int k = 1; k < N_; k++) sPlus += std::conj(psi_(k - 1)) * Cplus(J,spinM(k)) * psi_(k);
-        return sPlus;
-    }
-
-    // Compute the expectation value of S^minus = S^x - i S^y.
-    Complex avgSminus() const {
-        const double J = spinJ();
-        Complex sMinus(0.0, 0.0);
-        for (int k = 0; k < N_ - 1; k++) sMinus += std::conj(psi_(k + 1)) * Cmnus(J, spinM(k)) * psi_(k);
-        return sMinus;
-    }
-
-    // Return <S_x> = Re<S_+>   and   <S_y> = Im<S_+>.
-    double avgSx() const { return avgSplus().real(); }
-    double avgSy() const { return avgSplus().imag(); }
-
-    // Compute the expectation value of S^z.
-    double avgSz() const {
+        for (int k = 1; k < N_; k++) sPlus += std::conj(psi_(k - 1)) * Cplus(J, spinM(k)) * psi_(k);
+        // <S_z>, pairing m and -m: symmetric evaluation helps against rounding errors.
         double sz = 0.0;
-        // Symmetric evaluation helps against rounding errors.
         for (int k = 0; k < N_ / 2; k++) sz += spinM(k) * (std::norm(psi_(k)) - std::norm(psi_(N_ - 1 - k)));
-        return sz;
+        return Vector3(sPlus.real(), sPlus.imag(), sz);
     }
 
-    // Compute <S_+^2> = sum_m conj(psi_{m+2}) <J,m+2|S_+|J,m+1><J,m+1|S_+|J,m> psi_m.
-    Complex avgSplus2() const {
-        const double J = spinJ();
-        Complex sPlus2(0.0, 0.0);
-        for (int k = 2; k < N_; k++) sPlus2 += std::conj(psi_(k - 2)) * Cplus(J, spinM(k) + 1) * Cplus(J, spinM(k)) * psi_(k);
-        return sPlus2;
+    // Covariance matrix of the spin, with the variances Var(S_a) on the diagonal:
+    //     C_ab = < (dS_a dS_b + dS_b dS_a) / 2 >,   with dS_a = S_a - <S_a>   (a, b = x, y, z).
+    // The symmetrisation makes C real and symmetric even though S_a and S_b do not commute.
+    Matrix3 covSpin() const {
+        Matrix dS(N_, 3);
+        // First, compute the mean spin <S_a> = (<S_x>, <S_y>, <S_z>).
+        const Vector3 mean = avgSpin();
+        // Subtracting the mean BEFORE any product is what keeps the result precise
+        for (int a = 0; a < 3; a++) dS.col(a) = applyS(a + 1) - mean(a) * psi_;
+        // In our notation (dS^dagger * dS)_ab =  <psi| dS_a dS_b |psi>.
+        // The symmetrised average is then just the real part.
+        return (dS.adjoint() * dS).real();
     }
-
-    // Compute <S_x^2> = (J(J+1) - <S_z^2> + Re<S_+^2> ) / 2.
-    double avgSx2() const {
-        const double J = spinJ();
-        return 0.5 * (J * (J + 1) * psi_.squaredNorm() - avgSz2() + avgSplus2().real());
-    }
-
-    // Compute <S_y^2> = (J(J+1) - <S_z^2> - Re<S_+^2> ) / 2.
-    double avgSy2() const {
-        const double J = spinJ();
-        return 0.5 * (J * (J + 1) * psi_.squaredNorm() - avgSz2() - avgSplus2().real());
-    }
-    
-    // Compute <S_z^2> = sum_m m^2 |psi_m|^2.
-    double avgSz2() const {
-        double sz2 = 0.0;
-        for (int k = 0; k < N_; k++) sz2 += spinM(k) * spinM(k) * std::norm(psi_(k));
-        return sz2;
-    }
-
-    // Variances computed as a sum of squares:  Var(S_a) = || (S_a - <S_a>) psi ||^2.
-    // The mean is subtracted BEFORE squaring, so no large numbers cancel: the result is never
-    // negative and has no rounding noise of order J^2 * 1e-16 (unlike <S_a^2> - <S_a>^2).
-    double varSx() const { return deviationNorm2(1); }
-    double varSy() const { return deviationNorm2(2); }
-    double varSz() const { return deviationNorm2(3); }
 
 
     // Husimi Q function on a (theta, phi) grid, for plotting the state on the Bloch sphere:
@@ -402,6 +389,19 @@ public:
         return *this;
     }
 
+    // Apply a unitary N x N matrix:   psi -> U psi.
+    Qudit& applyRotation(const Matrix& U) {
+        // Check the matrix size.
+        if (U.rows() != N_ || U.cols() != N_) throw std::invalid_argument("Qudit::applyRotation: U must be N x N");
+        // Compute a new vector: psi_ is untouched for now.
+        StateVector out = U * psi_;   
+        // Check the rotation is norm preserving.
+        if (std::abs(out.norm() - psi_.norm()) > 1e-10 * psi_.norm()) throw std::runtime_error("Qudit::applyRotation: U does not preserve the norm (not unitary?)");
+        // Finally, update the state.
+        psi_.swap(out);
+        return *this;
+    }   
+
     // Pulse about z by phi:  exp(-i phi S_z)|J,m> = exp(-i phi m)|J,m>,  m = J - k.
     Qudit& applyPulseZ(double phi) {
         // Written as exp(-i phi J) * exp(i phi k): the first factor is a GLOBAL phase...
@@ -421,20 +421,17 @@ public:
         return *this;
     }
 
-    // Pulse about y by Pi:   exp(-i pi S_y) |J,m> = (-1)^(J-m)   |J,-m>
-    Qudit& applyPulseYPi() {
-        StateVector out(N_);
-        // Since k = J - m, m -> -m means k -> 2J-k: send psi(k) to position N-1-k.
-        for (int k = 0; k < N_; k++) out(N_ - 1 - k) = (k % 2 == 0 ? 1.0 : -1.0) * psi_(k);
-        psi_.swap(out);
-        return *this;
+    // Pulse about x by phi: exp(-i phi S_x) = R_y(pi/2) R_z(phi) R_y(-pi/2),
+    // with R_a(phi) = exp(-i phi S_a) and R_y(-pi/2) = Dy^dagger.
+    Qudit& applyPulseX(double phi) {
+        // The rightmost factor acts first, so the calls are in reverse order.
+        return applyRotation(Dy_.adjoint()).applyPulseZ(phi).applyRotation(Dy_);
     }
 
-    // Pulse about y by Pi/2: send z into x axis.
-    Qudit& applyPulseYPiHalf() { 
-        // Apply Dy = exp{-i pi S_y /2} to psi.
-        return applyRotation(Dy_); 
-    }  
+    // Pulse about y by phi: exp(-i phi S_y) = R_z(pi/2) R_x(phi) R_z(-pi/2).
+    Qudit& applyPulseY(double phi) {
+        return applyPulseZ(-kPi_ / 2).applyPulseX(phi).applyPulseZ(kPi_ / 2);
+    } 
 
     // Pulse about x by Pi:   exp(-i pi S_x) |J,m> = exp(-i pi J) |J,-m>
     Qudit& applyPulseXPi() {
@@ -446,25 +443,26 @@ public:
         return *this;
     }
 
-    // Pulse about x by Pi/2: send y into z axis.
-    Qudit& applyPulseXPiHalf() { 
-        // The rightmost factor acts first, so the calls are in reverse order:
-        // applyPulseZ(phi) = exp(-i phi S_z), hence +pi/2 first and -pi/2 last.        
-        return applyPulseZ(kPi_ / 2).applyPulseYPiHalf().applyPulseZ(-kPi_ / 2); 
-    }
-
-    // Apply a unitary N x N matrix:   psi -> U psi.
-    Qudit& applyRotation(const Matrix& U) {
-        // Check the matrix size.
-        if (U.rows() != N_ || U.cols() != N_) throw std::invalid_argument("Qudit::applyRotation: U must be N x N");
-        // Compute a new vector: psi_ is untouched for now.
-        StateVector out = U * psi_;   
-        // Check the rotation is norm preserving.
-        if (std::abs(out.norm() - psi_.norm()) > 1e-10 * psi_.norm()) throw std::runtime_error("Qudit::applyRotation: U does not preserve the norm (not unitary?)");
-        // Finally, update the state.
+    // Pulse about y by Pi:   exp(-i pi S_y) |J,m> = (-1)^(J-m)   |J,-m>
+    Qudit& applyPulseYPi() {
+        StateVector out(N_);
+        // Since k = J - m, m -> -m means k -> 2J-k: send psi(k) to position N-1-k.
+        for (int k = 0; k < N_; k++) out(N_ - 1 - k) = (k % 2 == 0 ? 1.0 : -1.0) * psi_(k);
         psi_.swap(out);
         return *this;
-    }    
+    }
+
+    // Pulse about x by Pi/2: sends y into z and z into -y.
+    Qudit& applyPulseXPiHalf() { 
+        // applyPulseZ(phi) = exp(-i phi S_z), hence +pi/2 first and -pi/2 last.        
+        return applyPulseZ(kPi_ / 2).applyRotation(Dy_).applyPulseZ(-kPi_ / 2); 
+    }
+
+    // Pulse about y by Pi/2: sends z into x and x into -z.
+    Qudit& applyPulseYPiHalf() { 
+        // Apply Dy = exp{-i pi S_y /2} to psi.
+        return applyRotation(Dy_); 
+    }  
 
     // Evolve for a time t under a Hamiltonian DIAGONAL in the S_z basis:
     //     psi_k -> exp(-i E_k t) psi_k,   with E_k = <J,J-k| H |J,J-k>.
@@ -504,10 +502,11 @@ public:
         //         <Sz> = 20        Var(Sz) = 0
         // The number format follows the stream settings chosen by the caller,
         // e.g. std::cout << std::fixed << std::setprecision(4) before calling it.
-        std::cout << name << " :  <psi|psi> = " << psi_.squaredNorm() << "\n"
-                  << "    <Sx> = " << avgSx() << "\tVar(Sx) = " << varSx() << "\n"
-                  << "    <Sy> = " << avgSy() << "\tVar(Sy) = " << varSy() << "\n"
-                  << "    <Sz> = " << avgSz() << "\tVar(Sz) = " << varSz() << "\n";
+        const Vector3 s = avgSpin();
+        const Matrix3 C = covSpin();
+        const char axis[3] = {'x', 'y', 'z'};
+        std::cout << name << " :  <psi|psi> = " << psi_.squaredNorm() << "\n";
+        for (int a = 0; a < 3; a++) std::cout << "    <S" << axis[a] << "> = " << s(a) << "\tVar(S" << axis[a] << ") = " << C(a, a) << "\n";
     }
 
     // Save the state to a plain text file named fileName.
@@ -651,30 +650,26 @@ private:
                     - std::lgamma(n - k + 1.0));
     }
 
-    // || (S_a - <S_a>) psi ||^2 for a = 1 (x), 2 (y), 3 (z), without building any matrix.
+    // S_a psi for a = 1 (x), 2 (y), 3 (z), without building any matrix.
     // (S_+ psi)_k = Cplus(J, m_{k+1}) psi_{k+1}   (S_+ raises m: takes index k+1 to k),
-    // (S_- psi)_k = Cmnus(J, m_{k-1}) psi_{k-1}  (S_- lowers m: takes index k-1 to k),
+    // (S_- psi)_k = Cmnus(J, m_{k-1}) psi_{k-1}   (S_- lowers m: takes index k-1 to k),
     // S_x = (S_+ + S_-)/2,   S_y = (S_+ - S_-)/(2i),   S_z diagonal with entries m.
-    double deviationNorm2(int axis) const {
+    StateVector applyS(int axis) const {
+        if (axis < 1 || axis > 3) throw std::invalid_argument("Qudit::applyS: axis must be 1, 2 or 3");
         const double J = spinJ();
-        const double mean = (axis == 1) ? avgSx() : (axis == 2) ? avgSy() : avgSz();
-        double sum = 0.0;
+        StateVector out(N_);
         for (int k = 0; k < N_; k++) {
-            // Define the k-component of S_a psi.
-            Complex Spsi(0.0, 0.0);
             if (axis == 3) {
-                Spsi = spinM(k) * psi_(k);
+                out(k) = spinM(k) * psi_(k);
             } else {
                 // Manage the edges while computing S_+ psi and S_- psi.
                 const Complex down = (k > 0)      ? Cmnus(J, spinM(k - 1)) * psi_(k - 1) : Complex(0.0, 0.0);
                 const Complex up   = (k + 1 < N_) ? Cplus(J, spinM(k + 1)) * psi_(k + 1) : Complex(0.0, 0.0);
-                // Compute the S_x or S_y k-component...
-                Spsi = (axis == 1) ? 0.5 * (up + down) : Complex(0.0, -0.5) * (up - down);
+                // Compute the S_x or S_y k-component.
+                out(k) = (axis == 1) ? 0.5 * (up + down) : Complex(0.0, -0.5) * (up - down);
             }
-            // ... and subtract the average as |((S_a - <S_a>) psi)_k|^2.
-            sum += std::norm(Spsi - mean * psi_(k));
         }
-        return sum;
+        return out;
     }
 
     // Moduli of the coherent spin state amplitudes:

@@ -1,5 +1,5 @@
 // ============================================================================
-//  qudit_test.cpp  --  test of spin::Qudit
+//  test_qudit.cpp  --  test of spin::Qudit
 //  Build:  g++ -std=c++17 -Wall -Wextra -O2 -isystem /usr/include/eigen3 test_qudit.cpp -o qudit_demo.out
 //  Run:    ./qudit_demo.out
 // ============================================================================
@@ -34,12 +34,15 @@ int main() {
     q.prepareDickeY(3).printSpin("DickeY k=3");
 
     // 4) Pulses on CSS+Z (or CSS+X): expected final directions in brackets.
+    //    A pulse by any angle a about x (y) tilts +Z towards -y (+x): <S> = J sin(a) along that axis.
     std::cout << "\nPulses (expected direction of <S>):\n";
-    q.prepareNamed("CSS+Z").applyPulseXPiHalf();  std::cout << "  pi/2 X on +Z -> <Sy> = " << q.avgSy() << "  [-J]\n";
-    q.prepareNamed("CSS+Z").applyPulseYPiHalf();  std::cout << "  pi/2 Y on +Z -> <Sx> = " << q.avgSx() << "  [+J]\n";
-    q.prepareNamed("CSS+Z").applyPulseXPi();      std::cout << "  pi   X on +Z -> <Sz> = " << q.avgSz() << "  [-J]\n";
-    q.prepareNamed("CSS+X").applyPulseYPi();      std::cout << "  pi   Y on +X -> <Sx> = " << q.avgSx() << "  [-J]\n";
-    q.prepareNamed("CSS+X").applyPulseZ(pi / 2);  std::cout << "  pi/2 Z on +X -> <Sy> = " << q.avgSy() << "  [+J]\n";
+    q.prepareNamed("CSS+Z").applyPulseXPiHalf();  std::cout << "  pi/2 X on +Z -> <Sy> = " << q.avgSpin()(1) << "  [-J]\n";
+    q.prepareNamed("CSS+Z").applyPulseYPiHalf();  std::cout << "  pi/2 Y on +Z -> <Sx> = " << q.avgSpin()(0) << "  [+J]\n";
+    q.prepareNamed("CSS+Z").applyPulseXPi();      std::cout << "  pi   X on +Z -> <Sz> = " << q.avgSpin()(2) << "  [-J]\n";
+    q.prepareNamed("CSS+X").applyPulseYPi();      std::cout << "  pi   Y on +X -> <Sx> = " << q.avgSpin()(0) << "  [-J]\n";
+    q.prepareNamed("CSS+X").applyPulseZ(pi / 2);  std::cout << "  pi/2 Z on +X -> <Sy> = " << q.avgSpin()(1) << "  [+J]\n";
+    q.prepareNamed("CSS+Z").applyPulseX(0.3);    std::cout << "  0.3  X on +Z -> <Sy> = " << q.avgSpin()(1) << "  [" << -J * std::sin(0.3) << "]\n";
+    q.prepareNamed("CSS+Z").applyPulseY(0.3);    std::cout << "  0.3  Y on +Z -> <Sx> = " << q.avgSpin()(0) << "  [" << J * std::sin(0.3) << "]\n";
 
     // 5) Diagonal evolution: one-axis twisting H = chi Sz^2 from CSS+X.
     //    Exact result: <Sx>(t) = J cos(chi t)^(2J-1).
@@ -51,8 +54,8 @@ int main() {
     for (int step = 1; step <= steps; step++) {
         q.evolveDiagonal(E, dt);
         const double t = step * dt;
-        std::cout << "  t = " << t << " :  <Sx> = " << q.avgSx() << "   exact = " << J * std::pow(std::cos(chi * t), 2 * J - 1)
-                  << "   Var(Sy) = " << q.varSy() << "\n";
+        std::cout << "  t = " << t << " :  <Sx> = " << q.avgSpin()(0) << "   exact = " << J * std::pow(std::cos(chi * t), 2 * J - 1)
+                  << "   Var(Sy) = " << q.covSpin()(1, 1) << "\n";
     }
 
     // 6) NON-diagonal evolution: H = Omega Sx (Rabi rotation about x) from CSS+Z.
@@ -72,18 +75,25 @@ int main() {
         const double t = step * pi / 8;                              // from 0 to a pi rotation
         q.prepareNamed("CSS+Z").evolve(solver.eigenvalues(), solver.eigenvectors(), t);
         const double s = std::sin(Omega * t);
-        std::cout << std::setw(7) << t << std::setw(10) << q.avgSz() << std::setw(10) << J * std::cos(Omega * t)
-                  << std::setw(10) << q.varSz() << std::setw(10) << 0.5 * J * s * s << "\n";
+        std::cout << std::setw(7) << t << std::setw(10) << q.avgSpin()(2) << std::setw(10) << J * std::cos(Omega * t)
+                  << std::setw(10) << q.covSpin()(2, 2) << std::setw(10) << 0.5 * J * s * s << "\n";
     }
+    std::cout << "\n";
 
-    // 7) Save / load round trip.
+    // 7) Reference state |o> = sum_m |J,m>_y / sqrt(2J+1) (paper, Eq. 45): mean spin along +z,
+    //    with <Sz>/J -> pi/4 for large J. covSpin() gives the full covariance matrix.
+    q.prepareReference().printSpin("Reference");
+    std::cout << "    <Sz>/J = " << q.avgSpin()(2) / J << "   [pi/4 = " << pi / 4 << " for large J]\n"
+              << "    Covariance matrix:\n" << q.covSpin() << "\n";
+
+    // 8) Save / load round trip.
     q.prepareCSS(theta, phi).save("q_test.txt");
     spin::Qudit loaded(N);
     loaded.load("q_test.txt");
     std::cout << std::scientific << "\nsave/load: max |difference| = "
               << (loaded.state() - q.state()).cwiseAbs().maxCoeff() << "\n";
 
-    // 8) Errors are reported with exceptions.
+    // 9) Errors are reported with exceptions.
     try { spin::Qudit(N + 3).load("q_test.txt"); } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
     try { spin::Qudit(N, "CSS+W");               } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
     try { q.prepareDickeZ(N);                    } catch (const std::exception& e) { std::cout << "expected error: " << e.what() << "\n"; }
