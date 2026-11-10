@@ -9,7 +9,7 @@
 //
 //    import spinlib
 //    q = spinlib.Qudit(41, "CSS+X")
-//    print(q.avgSx(), q.varSy())
+//    q.printSpin("q")
 //
 //  Eigen <-> NumPy: every StateVector / RealVector / Matrix is converted
 //  automatically to / from a NumPy array (pybind11/eigen.h).
@@ -26,7 +26,7 @@ namespace py = pybind11;
 using spin::Qudit;
 
 PYBIND11_MODULE(spinlib, m) {
-    m.doc() = "Single spin J (qudit) of dimension N = 2J+1";
+    m.doc() = "Single spin J (qudit) of dimension Z = 2J+1";
 
     // Methods returning Qudit& (preparations, modifiers) must return a REFERENCE to the
     // same Python object, otherwise Python would receive a copy and chaining such as
@@ -35,7 +35,7 @@ PYBIND11_MODULE(spinlib, m) {
 
     py::class_<Qudit>(m, "Qudit")
         // a.) Constructor
-        .def(py::init<int, const std::string&>(), py::arg("N"), py::arg("init") = "CSS+Z")
+        .def(py::init<int, const std::string&>(), py::arg("Z"), py::arg("init") = "CSS+Z")
 
         // b.) State preparations
         .def("prepareNamed",         &Qudit::prepareNamed,         py::arg("label"),       self)

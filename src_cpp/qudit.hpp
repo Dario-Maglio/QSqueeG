@@ -2,7 +2,7 @@
 //  qudit.hpp   --   header-only definition of the class spin::Qudit
 // ----------------------------------------------------------------------------
 //  The class stores the (pure) quantum state of a single spin J, i.e. a
-//  vector in a Hilbert space of dimension N = 2J + 1.
+//  vector in a Hilbert space of dimension Z = 2J + 1.
 //
 //  To use the class, simply write #include "qudit.hpp"
 //
@@ -16,7 +16,7 @@
 //  We work in the eigenbasis of S_z, ordered from the HIGHEST to the LOWEST
 //  projection m:
 //
-//      index k :   0       1        2       ...    N-1
+//      index k :   0       1        2       ...    Z-1
 //      state   : |J,J>  |J,J-1>  |J,J-2>    ...  |J,-J>
 //
 //  i.e.  m = J - k   <=>   k = J - m.
@@ -57,18 +57,18 @@ using Complex = std::complex<double>;
 // Array instead of Vector: it is a plain table, no linear algebra.
 using BoolArray = Eigen::Array<bool, Eigen::Dynamic, 1>;
 
-// Short alias: a vector of N real numbers (e.g. the energies of H).
+// Short alias: a vector of Z real numbers (e.g. the energies of H).
 // Eigen::VectorXd = double vector whose size is chosen at run time.
 using RealVector = Eigen::VectorXd;
 
-// Short alias: a state vector = list of N complex amplitudes.
+// Short alias: a state vector = list of Z complex amplitudes.
 // Eigen::VectorXcd = complex<double> vector whose size is chosen at run time.
 using StateVector = Eigen::VectorXcd;
 
 // Short alias: a real matrix (e.g. a function sampled on a grid).
 using RealMatrix = Eigen::MatrixXd;
 
-// Short alias: a complex N x N matrix (e.g. a rotation or evolution operator).
+// Short alias: a complex Z x Z matrix (e.g. a rotation or evolution operator).
 using Matrix = Eigen::MatrixXcd;
 
 // Short aliases: a real 3-vector and a real 3 x 3 matrix, one entry per axis x, y, z
@@ -84,7 +84,7 @@ using Matrix3 = Eigen::Matrix3d;
 //  Class Qudit
 // ============================================================================
 //  a.) Constructor
-//        Qudit(N, init="CSS+Z")           N = 2J+1; init = named state (see below)
+//        Qudit(Z, init="CSS+Z")           Z = 2J+1; init = named state (see below)
 //
 //  b.) State preparations  (overwrite the state, return *this for chaining)
 //        prepareNamed(label)              "CSS+Z", "CSS-Z", "CSS+X", "CSS-X", "CSS+Y", "CSS-Y"
@@ -96,7 +96,7 @@ using Matrix3 = Eigen::Matrix3d;
 //        prepareEquatorialCSS(q)          CSS along +x, +y, -x, -y for q = 0, 1, 2, 3 (exact phases)
 //
 //  c.) Getters  (read-only, const)
-//        dim(), spinJ(), spinM(k)         N, J, and m = J - k
+//        dim(), spinJ(), spinM(k)         Z, J, and m = J - k
 //        state(), norm(), amplitude(k)    state vector, Euclidean norm, single amplitude
 //        overlapCSS(theta, phi)           single amplitude with the corresponding CSS
 //        avgSpin()                        mean spin vector (<S_x>, <S_y>, <S_z>)
@@ -106,7 +106,7 @@ using Matrix3 = Eigen::Matrix3d;
 //  d.) Modifiers  (change the state, return *this for chaining)
 //        normalize()                      rescale to unit norm
 //        setState(v, normalizeIt=true)    replace the state with a given vector
-//        applyRotation(U)                 psi -> U psi, U unitary N x N
+//        applyRotation(U)                 psi -> U psi, U unitary Z x Z
 //        applyPulseZ(phi)                 exp(-i phi S_z), exact for multiples of pi/2
 //        applyPulseX(phi)                 exp(-i phi S_x), uses Dy_ twice and one z pulse
 //        applyPulseY(phi)                 exp(-i phi S_y), applyPulseX between two z pulses
@@ -121,7 +121,7 @@ using Matrix3 = Eigen::Matrix3d;
 //        save(fileName), load(fileName)   plain text file, full double precision
 //
 //  f.) Private data members and helpers
-//        N_, psi_, Dy_                    dimension, state, Wigner matrix exp(-i pi/2 S_y)
+//        Z_, psi_, Dy_                    dimension, state, Wigner matrix exp(-i pi/2 S_y)
 //        kPrecision_                      precision required by the save and load methods
 //        phase_, kPi_, kHeader_           powers of i, pi, data file header
 //        Cplus(J, m), Cmnus(J, m)         ladder matrix elements of S_+ and S_-
@@ -135,8 +135,8 @@ public:
     // ========================================================================
     //  a.) Constructor
     // ========================================================================
-    // N    : dimension of the Hilbert space, N = 2J + 1  (must be >= 1).
-    //        N = 2 is a spin-1/2 (qubit), N = 3 a spin-1 (qutrit), ...
+    // Z    : dimension of the Hilbert space, Z = 2J + 1  (must be >= 1).
+    //        Z = 2 is a spin-1/2 (qubit), Z = 3 a spin-1 (qutrit), ...
     //
     // init : OPTIONAL label of the initial state. Accepted labels:
     //          "CSS+Z"  -> |J, J>   (spin pointing along +z)  [DEFAULT]
@@ -152,12 +152,12 @@ public:
     // ------------------------------------------------------------------------
     
     // The "explicit" forbids silent conversions. The member initialiser 
-    // list ( : N_(N), psi_(...), ... ) initialises the data members first.
+    // list ( : Z_(Z), psi_(...), ... ) initialises the data members first.
     // StateVector::Zero(n) creates a vector of n zeros.
-    explicit Qudit(int N, const std::string& init = "CSS+Z")
-        : N_(N), psi_(StateVector::Zero(N > 0 ? N : 0)) {
-        // Check the physical size N.
-        if (N < 1) throw std::invalid_argument("Qudit: invalid dimension " + std::to_string(N) + ".");
+    explicit Qudit(int Z, const std::string& init = "CSS+Z")
+        : Z_(Z), psi_(StateVector::Zero(Z > 0 ? Z : 0)) {
+        // Check the physical size Z.
+        if (Z < 1) throw std::invalid_argument("Qudit: invalid dimension " + std::to_string(Z) + ".");
         // Fill psi_ according to the requested label.
         prepareNamed(init);
         // Build the rotation matrix exp(-i pi/2 S_y).
@@ -176,7 +176,7 @@ public:
     Qudit& prepareNamed(const std::string& label) {
         // Exact states along +/- z are set as Dicke states.
         if (label == "CSS+Z") return prepareDickeZ(0);
-        if (label == "CSS-Z") return prepareDickeZ(N_ - 1);
+        if (label == "CSS-Z") return prepareDickeZ(Z_ - 1);
         // Equatorial states: theta = pi/2, phi selects the direction.
         if (label == "CSS+X") return prepareEquatorialCSS(0);
         if (label == "CSS+Y") return prepareEquatorialCSS(1);
@@ -186,12 +186,12 @@ public:
         throw std::invalid_argument("Qudit: unknown initial state \"" + label + "\".");
     }
 
-    // Dicke state |J, m>, with m = J - k for 0 <= k <= N-1.  
+    // Dicke state |J, m>, with m = J - k for 0 <= k <= Z-1.  
     // Applying Jplus = Jx + i Jy sends k to k - 1.
-    // Setting k = 0 gives |J,J>, k = N-1 gives |J,-J>.
+    // Setting k = 0 gives |J,J>, k = Z-1 gives |J,-J>.
     Qudit& prepareDickeZ(int k) {
         // Check that k is a valid spin k = J - m.
-        if (k < 0 || k >= N_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
+        if (k < 0 || k >= Z_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
         // Set every amplitude to 0...
         psi_.setZero();
         // ... and put a single 1 at position k.
@@ -223,9 +223,9 @@ public:
     // Reference state of the qudit ruler: |o> = sum_m |J,m>_y / sqrt(2J+1).
     // Its mean spin points to +z, with <S_z>/J -> pi/4 for large J.
     Qudit& prepareReference() {
-        const double amplitude = 1.0 / std::sqrt(static_cast<double>(N_));
+        const double amplitude = 1.0 / std::sqrt(static_cast<double>(Z_));
         // Signed sum of the z Dicke states: phase (-1)^k = i^(2k), as in prepareDickeY...
-        for (int k = 0; k < N_; k++) psi_(k) = amplitude * phase_[(2 * k) % 4];
+        for (int k = 0; k < Z_; k++) psi_(k) = amplitude * phase_[(2 * k) % 4];
         // ... then a pi/2 pulse about y and a pi/2 pulse about z.
         return applyPulseYPiHalf().applyPulseZ(kPi_ / 2);
     }
@@ -241,7 +241,7 @@ public:
         // by rotating |J,J> so that <S_n> = J. It is normalised by construction.
         const RealVector r = cssModuli(theta);
         // Moduli r times the phases exp(i k phi) with std::polar(r, angle).
-        for (int k = 0; k < N_; k++) psi_(k) = std::polar(r(k), k * phi);
+        for (int k = 0; k < Z_; k++) psi_(k) = std::polar(r(k), k * phi);
         return *this;
     }
 
@@ -251,7 +251,7 @@ public:
     Qudit& prepareEquatorialCSS(int q) {
         // Check the q value is valid.
         if (q < 0 || q > 3) throw std::invalid_argument("Qudit: unknown equatorial preparation.");
-        const int twoJ = N_ - 1;
+        const int twoJ = Z_ - 1;
         // Compute log of 2^J, the same for every k.
         const double logNorm = 0.5 * twoJ * std::log(2.0);
         // Compute the amplitudes in a symmetric way.
@@ -272,9 +272,9 @@ public:
     // ========================================================================
 
     //  The "const" promises that these methods do not modify the qudit.
-    int dim() const { return N_; }                   // N = 2J + 1
+    int dim() const { return Z_; }                   // Z = 2J + 1
 
-    double spinJ() const { return 0.5 * (N_ - 1); }  // J = (N - 1) / 2
+    double spinJ() const { return 0.5 * (Z_ - 1); }  // J = (Z - 1) / 2
 
     // Projection m associated with the basis index k (m = J - k).
     double spinM(int k) const { return spinJ() - k; }
@@ -287,7 +287,7 @@ public:
 
     // Single amplitude <J, J-k | psi>, with bounds checking.
     Complex amplitude(int k) const {
-        if (k < 0 || k >= N_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
+        if (k < 0 || k >= Z_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
         return psi_(k);
     }
 
@@ -298,12 +298,12 @@ public:
         // The sum is a polynomial in z = exp(-i phi):  sum_k r_k psi_k z^k.  
         // Horner's rule counts from the highest power down, with b_k = r_k psi_k:
         //         overlap = b_0 + z (b_1 + z (b_2 + ...))  
-        // only N multiplications and additions, no powers z^k and no sin/cos.
+        // only Z multiplications and additions, no powers z^k and no sin/cos.
         const Complex z = std::polar(1.0, -phi);
-        // Define b_{N-1} as...
-        Complex overlap = r(N_ - 1) * psi_(N_ - 1);
+        // Define b_{Z-1} as...
+        Complex overlap = r(Z_ - 1) * psi_(Z_ - 1);
         // ... and iterate until k=0.
-        for (int k = N_ - 2; k >= 0; k--) overlap = overlap * z + r(k) * psi_(k);
+        for (int k = Z_ - 2; k >= 0; k--) overlap = overlap * z + r(k) * psi_(k);
         return overlap;
     }
 
@@ -312,10 +312,10 @@ public:
         const double J = spinJ();
         // <S_+> = <S_x> + i <S_y>, with S_+ taking index k to k - 1 (m to m + 1).
         Complex sPlus(0.0, 0.0);
-        for (int k = 1; k < N_; k++) sPlus += std::conj(psi_(k - 1)) * Cplus(J, spinM(k)) * psi_(k);
+        for (int k = 1; k < Z_; k++) sPlus += std::conj(psi_(k - 1)) * Cplus(J, spinM(k)) * psi_(k);
         // <S_z>, pairing m and -m: symmetric evaluation helps against rounding errors.
         double sz = 0.0;
-        for (int k = 0; k < N_ / 2; k++) sz += spinM(k) * (std::norm(psi_(k)) - std::norm(psi_(N_ - 1 - k)));
+        for (int k = 0; k < Z_ / 2; k++) sz += spinM(k) * (std::norm(psi_(k)) - std::norm(psi_(Z_ - 1 - k)));
         return Vector3(sPlus.real(), sPlus.imag(), sz);
     }
 
@@ -323,7 +323,7 @@ public:
     //     C_ab = < (dS_a dS_b + dS_b dS_a) / 2 >,   with dS_a = S_a - <S_a>   (a, b = x, y, z).
     // The symmetrisation makes C real and symmetric even though S_a and S_b do not commute.
     Matrix3 covSpin() const {
-        Matrix dS(N_, 3);
+        Matrix dS(Z_, 3);
         // First, compute the mean spin <S_a> = (<S_x>, <S_y>, <S_z>).
         const Vector3 mean = avgSpin();
         // Subtracting the mean BEFORE any product is what keeps the result precise
@@ -349,10 +349,10 @@ public:
             for (int j = 0; j < nPhi; j++) {
                 const Complex z = std::polar(1.0, -2.0 * kPi_ * j / (nPhi - 1));
                 // To compute sum_k b_k z^k with with b_k = r_k psi_k and z = exp(-i phi_j),
-                // we use Horner's rule as in overlapCSS. First, define b_{N-1} as...
-                Complex overlap = r(N_ - 1) * psi_(N_ - 1);
+                // we use Horner's rule as in overlapCSS. First, define b_{Z-1} as...
+                Complex overlap = r(Z_ - 1) * psi_(Z_ - 1);
                 // ... and then iterate until k=0.
-                for (int k = N_ - 2; k >= 0; k--) overlap = overlap * z + r(k) * psi_(k);
+                for (int k = Z_ - 2; k >= 0; k--) overlap = overlap * z + r(k) * psi_(k);
                 // This gives the point (i,j) on the grid as:
                 Q(i, j) = std::norm(overlap);
             }
@@ -379,20 +379,20 @@ public:
         return *this;
     }
 
-    // Replace the state with a user-given vector (must have size N).
+    // Replace the state with a user-given vector (must have size Z).
     Qudit& setState(const StateVector& amplitudes, bool normalizeIt = true) {
         // Check the size of amplitudes. 
-        if (amplitudes.size() != N_) throw std::invalid_argument("Qudit::setState: vector size differs from N");
+        if (amplitudes.size() != Z_) throw std::invalid_argument("Qudit::setState: vector size differs from Z");
         // Fill and normalize.
         psi_ = amplitudes;
         if (normalizeIt) normalize();
         return *this;
     }
 
-    // Apply a unitary N x N matrix:   psi -> U psi.
+    // Apply a unitary Z x Z matrix:   psi -> U psi.
     Qudit& applyRotation(const Matrix& U) {
         // Check the matrix size.
-        if (U.rows() != N_ || U.cols() != N_) throw std::invalid_argument("Qudit::applyRotation: U must be N x N");
+        if (U.rows() != Z_ || U.cols() != Z_) throw std::invalid_argument("Qudit::applyRotation: U must be Z x Z");
         // Compute a new vector: psi_ is untouched for now.
         StateVector out = U * psi_;   
         // Check the rotation is norm preserving.
@@ -414,9 +414,9 @@ public:
         if (std::abs(q - static_cast<double>(qInt)) <= 1e-15 * std::abs(q)) {
             // In this case, take q mod 4 in 0..3, also for q < 0
             const int r = static_cast<int>(((qInt % 4) + 4) % 4);   
-            for (int k = 0; k < N_; k++) psi_(k) *= global * phase_[(r * k) % 4];
+            for (int k = 0; k < Z_; k++) psi_(k) *= global * phase_[(r * k) % 4];
         } else {
-            for (int k = 0; k < N_; k++) psi_(k) *= global * std::polar(1.0, phi * k);
+            for (int k = 0; k < Z_; k++) psi_(k) *= global * std::polar(1.0, phi * k);
         }
         return *this;
     }
@@ -435,19 +435,19 @@ public:
 
     // Pulse about x by Pi:   exp(-i pi S_x) |J,m> = exp(-i pi J) |J,-m>
     Qudit& applyPulseXPi() {
-        StateVector out(N_);
+        StateVector out(Z_);
         const Complex phaseX = std::polar(1.0, -kPi_ * spinJ());
-        // Since k = J - m, m -> -m means k -> 2J-k: send psi(k) to position N-1-k.
-        for (int k = 0; k < N_; k++) out(N_ - 1 - k) =  phaseX * psi_(k);
+        // Since k = J - m, m -> -m means k -> 2J-k: send psi(k) to position Z-1-k.
+        for (int k = 0; k < Z_; k++) out(Z_ - 1 - k) =  phaseX * psi_(k);
         psi_.swap(out);
         return *this;
     }
 
     // Pulse about y by Pi:   exp(-i pi S_y) |J,m> = (-1)^(J-m)   |J,-m>
     Qudit& applyPulseYPi() {
-        StateVector out(N_);
-        // Since k = J - m, m -> -m means k -> 2J-k: send psi(k) to position N-1-k.
-        for (int k = 0; k < N_; k++) out(N_ - 1 - k) = (k % 2 == 0 ? 1.0 : -1.0) * psi_(k);
+        StateVector out(Z_);
+        // Since k = J - m, m -> -m means k -> 2J-k: send psi(k) to position Z-1-k.
+        for (int k = 0; k < Z_; k++) out(Z_ - 1 - k) = (k % 2 == 0 ? 1.0 : -1.0) * psi_(k);
         psi_.swap(out);
         return *this;
     }
@@ -466,12 +466,12 @@ public:
 
     // Evolve for a time t under a Hamiltonian DIAGONAL in the S_z basis:
     //     psi_k -> exp(-i E_k t) psi_k,   with E_k = <J,J-k| H |J,J-k>.
-    // energies : the N diagonal elements E_k of H, in the same order as psi_.
+    // energies : the Z diagonal elements E_k of H, in the same order as psi_.
     Qudit& evolveDiagonal(const RealVector& energies, double t) {
         // Check the size of energies.
-        if (energies.size() != N_) throw std::invalid_argument("Qudit::evolveDiagonal: number of energies differs from N");
+        if (energies.size() != Z_) throw std::invalid_argument("Qudit::evolveDiagonal: number of energies differs from Z");
         // Multiply each entry by the corresponding phase.
-        for (int k = 0; k < N_; k++) {
+        for (int k = 0; k < Z_; k++) {
             // std::polar(1.0, x) = exp(i x): a pure phase of modulus 1.
             psi_(k) *= std::polar(1.0, -t * energies(k));
         }
@@ -518,15 +518,15 @@ public:
         // Write kPrecision_ significant digits: enough to read back exactly the same.
         out.precision(kPrecision_);
         // Format (human readable):
-        //     # spin::Qudit state: N 6
+        //     # spin::Qudit state: Z 6
         //     # k   Re(psi_k)   Im(psi_k)
         //     0  0.17677669529663687  0
         //     1  0.39528470752104744  0
         //     ...
         // Change precision when changing format!
-        out << kHeader_ << N_ << "\n";
+        out << kHeader_ << Z_ << "\n";
         out << "# k   Re(psi_k)   Im(psi_k)\n";
-        for (int k = 0; k < N_; k++) {
+        for (int k = 0; k < Z_; k++) {
             const Complex& a = psi_(k);
             out << k << "  " << a.real() << "  " << a.imag() << "\n";
         }
@@ -536,7 +536,7 @@ public:
     }
 
     // Load a state previously written by save(), overwriting the current one.
-    // The N written in the file must coincide with this qudit's N.
+    // The Z written in the file must coincide with this qudit's Z.
     Qudit& load(const std::string& fileName) {
         // Try to open the file...
         std::ifstream in(fileName);
@@ -546,9 +546,9 @@ public:
         // Introduce a switch to check the header...
         bool headerRead = false;
         // ... and a checklist to verify that every entry is filled exactly once.
-        BoolArray seen = BoolArray::Constant(N_, false);        
+        BoolArray seen = BoolArray::Constant(Z_, false);        
         // Create a local vector instead of starting by overwriting psi_.
-        StateVector amplitudes = StateVector::Zero(N_);
+        StateVector amplitudes = StateVector::Zero(Z_);
 
         // Start reading the file contents.
         std::string line;
@@ -558,18 +558,18 @@ public:
             // Skip empty lines.
             if (first == std::string::npos) continue;
 
-            // The first non-empty line must be the header: read N from it.
+            // The first non-empty line must be the header: read Z from it.
             if (!headerRead) {
                 // line.rfind(header, 0) != 0  means "first line is not the header".
                 if (line.rfind(kHeader_, 0) != 0) throw std::runtime_error("Qudit::load: wrong header in \"" + fileName + "\"");
 
-                std::istringstream iss(line.substr(kHeader_.size()));  // the text after "N "
+                std::istringstream iss(line.substr(kHeader_.size()));  // the text after "Z "
                 int fileN = 0;
 
-                // Read N from file...
-                if (!(iss >> fileN)) throw std::runtime_error("Qudit::load: cannot read N in \"" + fileName + "\"");
+                // Read Z from file...
+                if (!(iss >> fileN)) throw std::runtime_error("Qudit::load: cannot read Z in \"" + fileName + "\"");
                 // ... and compare it with the current one.
-                if (fileN != N_) throw std::runtime_error("Qudit::load: N in \"" + fileName + "\" differs from the qudit's N");
+                if (fileN != Z_) throw std::runtime_error("Qudit::load: Z in \"" + fileName + "\" differs from the qudit's Z");
                 // Switch on and skip header reading from next iteration.
                 headerRead = true;
                 continue;
@@ -585,7 +585,7 @@ public:
             // Load data from line:
             if (!(iss >> k >> re >> im)) throw std::runtime_error("Qudit::load: malformed line \"" + line + "\"");
             // Check index (seen(k) is evaluated only if k is in range, thanks to ||):
-            if (k < 0 || k >= N_ || seen(k)) throw std::runtime_error("Qudit::load: invalid or duplicated index " + std::to_string(k));
+            if (k < 0 || k >= Z_ || seen(k)) throw std::runtime_error("Qudit::load: invalid or duplicated index " + std::to_string(k));
             // Store amplitude...
             amplitudes(k) = Complex(re, im);
             // ... and switch the checklist entry.
@@ -610,9 +610,9 @@ private:
     // ========================================================================
     // "static" members are properties of the class, i.e. do not belong to an object.
 
-    int N_;            // dimension of the Hilbert space, N = 2J + 1 (fixed)
+    int Z_;            // dimension of the Hilbert space, Z = 2J + 1 (fixed)
 
-    StateVector psi_;  // amplitudes psi_(k) = <J, J-k | psi>, k = 0..N-1
+    StateVector psi_;  // amplitudes psi_(k) = <J, J-k | psi>, k = 0..Z-1
 
     Matrix Dy_;        // Wigner matrix Dy_ = exp(-i pi/2 S_y)
 
@@ -626,7 +626,7 @@ private:
     static constexpr double kPi_ = 3.14159265358979323846;
 
     // Header for data files
-    static inline const std::string kHeader_ = "# spin::Qudit state: N ";
+    static inline const std::string kHeader_ = "# spin::Qudit state: Z ";
 
     // Matrix element of the raising operator: <J,m+1| S_+ |J,m> = sqrt( J(J+1) - m(m+1)).
     static double Cplus(double J, double m) {
@@ -657,14 +657,14 @@ private:
     StateVector applyS(int axis) const {
         if (axis < 1 || axis > 3) throw std::invalid_argument("Qudit::applyS: axis must be 1, 2 or 3");
         const double J = spinJ();
-        StateVector out(N_);
-        for (int k = 0; k < N_; k++) {
+        StateVector out(Z_);
+        for (int k = 0; k < Z_; k++) {
             if (axis == 3) {
                 out(k) = spinM(k) * psi_(k);
             } else {
                 // Manage the edges while computing S_+ psi and S_- psi.
                 const Complex down = (k > 0)      ? Cmnus(J, spinM(k - 1)) * psi_(k - 1) : Complex(0.0, 0.0);
-                const Complex up   = (k + 1 < N_) ? Cplus(J, spinM(k + 1)) * psi_(k + 1) : Complex(0.0, 0.0);
+                const Complex up   = (k + 1 < Z_) ? Cplus(J, spinM(k + 1)) * psi_(k + 1) : Complex(0.0, 0.0);
                 // Compute the S_x or S_y k-component.
                 out(k) = (axis == 1) ? 0.5 * (up + down) : Complex(0.0, -0.5) * (up - down);
             }
@@ -678,11 +678,11 @@ private:
     RealVector cssModuli(double theta) const {
         // Check the polar angle is between zero and pi (otherwise cos(theta/2) < 0 and its log is NaN).
         if (theta < 0. || theta > kPi_) throw std::invalid_argument("Qudit: invalid angle theta.");
-        const int twoJ = N_ - 1;                  // 2J, an integer
+        const int twoJ = Z_ - 1;                  // 2J, an integer
         const double c = std::cos(0.5 * theta);   // cos(theta/2)
         const double s = std::sin(0.5 * theta);   // sin(theta/2)
-        RealVector r(N_);
-        for (int k = 0; k < N_; k++) {
+        RealVector r(Z_);
+        for (int k = 0; k < Z_; k++) {
             double logMod = logSqrtBinomial(twoJ, k);
             // Manage the edges to avoid 0 * log(0) = NaN at the poles.
             if (k > 0)        logMod += k * std::log(s);
@@ -694,18 +694,18 @@ private:
 
     // Wigner matrix Dy_ = exp(-i pi/2 S_y): rotation by pi/2 about y, built once in the constructor.
     //     Dy_(a, k) = <J,m_a| exp(-i pi/2 S_y) |J,m_k>,   m_a = J - a,  m_k = J - k   (real numbers).
-    // Cost O(N^2), memory 16 N^2 bytes, accuracy ~1e-15 (N = 801: 2.5e-15), valid for N <= 2045.
+    // Cost O(Z^2), memory 16 Z^2 bytes, accuracy ~1e-15 (Z = 801: 2.5e-15), valid for Z <= 2045.
     Matrix buildDy() const {
-        const int twoJ = N_ - 1;
+        const int twoJ = Z_ - 1;
         const double J = spinJ();
         // The smallest number used below is 2^-J: it must be a normal double, i.e. J <= 1022.
-        if (twoJ / 2 > 1022) throw std::invalid_argument("Qudit: N > 2045 is too large for the double-precision Dy");
+        if (twoJ / 2 > 1022) throw std::invalid_argument("Qudit: Z > 2045 is too large for the double-precision Dy");
         
         // Edge rows. Their moduli are known in closed form (as for the equatorial CSS):
         //     D(0, k) = (-1)^k e_k,   D(2J, k) = e_k,   e_k = sqrt(C(2J,k)) / 2^J.
         // e_k is built as a product, e_k = e_{k-1} sqrt((2J-k+1)/k), from e_0 = 2^-J 
         // given exactly by std::ldexp(x, n) = x * 2^n. This is the reason for J <= 1022.
-        RealVector e(N_);
+        RealVector e(Z_);
         e(0) = std::ldexp(twoJ % 2 == 1 ? std::sqrt(0.5) : 1.0, -(twoJ / 2));
         // 2^-J = x * 2^-floor(J), x = sqrt(1/2) for half-integer J, 1 for integer J.
         for (int k = 1; k <= twoJ / 2; k++) e(k) = e(k - 1) * std::sqrt((twoJ - k + 1) / static_cast<double>(k));
@@ -718,9 +718,9 @@ private:
         //     ( Cmnus(J, m_{a-1}) D(a-1,k) + Cmnus(J, m_a) D(a+1,k) ) / 2 = m_k D(a,k).
         // It is run INWARD from both edges (the stable direction: near the edges each column grows inward),
         // and the two halves meet in the middle row.
-        RealMatrix D(N_, N_);
+        RealMatrix D(Z_, Z_);
         const int mid = twoJ / 2;                   // rows 0..mid from the top, mid+1..2J from the bottom
-        for (int k = 0; k < N_; k++) {
+        for (int k = 0; k < Z_; k++) {
             const double m = spinM(k);
             D(0, k)    = (k % 2 == 0) ? e(k) : -e(k);
             D(twoJ, k) = e(k);
