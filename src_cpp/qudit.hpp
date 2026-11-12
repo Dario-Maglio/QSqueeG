@@ -374,6 +374,7 @@ public:
     static Matrix wignerDy(int Z) {
         const int twoJ = Z - 1;
         const double J = 0.5 * twoJ;
+        if (Z < 1) throw std::invalid_argument("Qudit::wignerDy: invalid dimension " + std::to_string(Z) + ".");
         // The smallest number used below is 2^-J: it must be a normal double, i.e. J <= 1022.
         if (twoJ / 2 > 1022) throw std::invalid_argument("Qudit: Z > 2045 is too large for the double-precision Dy");
         
