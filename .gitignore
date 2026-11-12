@@ -32,3 +32,4 @@ JuliaLocalPreferences.toml
 .CondaPkg/
 
 .vscode/
+*.out
