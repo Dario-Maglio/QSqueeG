@@ -97,11 +97,13 @@ using Matrix3 = Eigen::Matrix3d;
 //
 //  c.) Getters  (read-only, const)
 //        dim(), spinJ(), spinM(k)         Z, J, and m = J - k
-//        state(), norm(), amplitude(k)    state vector, Euclidean norm, single amplitude
+//        state(), norm(), Dy()            state vector, Euclidean norm, Wigner matrix exp(-i pi/2 S_y) 
+//        amplitude(k)                     single amplitude with the Dicke state |J,J-k>
 //        overlapCSS(theta, phi)           single amplitude with the corresponding CSS
 //        avgSpin()                        mean spin vector (<S_x>, <S_y>, <S_z>)
 //        covSpin()                        3 x 3 covariance matrix, variances on the diagonal
 //        husimiQ(ntheta=61, nphi=121)     Husimi Q function as a ntheta x nphi matrix
+//        wignerDy(N)   [static]           the same matrix for any dimension N, built from scratch
 //
 //  d.) Modifiers  (change the state, return *this for chaining)
 //        normalize()                      rescale to unit norm
@@ -115,6 +117,8 @@ using Matrix3 = Eigen::Matrix3d;
 //        applyPulseYPiHalf()              pi/2 pulse about y, just applyRotation(Dy_)
 //        evolveDiagonal(E, t)             exp(-i H t) for H diagonal in S_z, diagonal entries E
 //        evolve(E, P, t)                  exp(-i H t) for H = P diag(E) P^dagger
+//        squeezeOAT(chi)                  one-axis twisting exp(-i chi S_z^2)
+//        squeezeTACT(chi)                 two-axis counter-twisting exp(-i chi {S_x,S_y}/2)
 //
 //  e.) Input / output
 //        printSpin(name="qudit")          norm, <S_a> and Var(S_a) for a = x, y, z
@@ -128,7 +132,6 @@ using Matrix3 = Eigen::Matrix3d;
 //        logSqrtBinomial(n, k)            log sqrt(C(n, k)), stable for large n
 //        applyS(axis)                     S_a psi for axis = 1, 2, 3 (x, y, z)
 //        cssModuli(theta)                 compute the modulus of CSS amplitudes
-//        buildDy()                        ladder recurrence for d^J(pi/2)
 // ============================================================================
 class Qudit {
 public:
@@ -161,7 +164,7 @@ public:
         // Fill psi_ according to the requested label.
         prepareNamed(init);
         // Build the rotation matrix exp(-i pi/2 S_y).
-        Dy_ = buildDy();
+        Dy_ = wignerDy(Z);
     }
 
 
@@ -285,6 +288,9 @@ public:
     // Euclidean norm sqrt( sum_k |psi_k|^2 ). Should be 1 for a physical state.
     double norm() const { return psi_.norm(); }
 
+    // Wigner matrix exp(-i pi/2 S_y) of this qudit (read-only, no copy in C++).
+    const Matrix& Dy() const { return Dy_; }
+
     // Single amplitude <J, J-k | psi>, with bounds checking.
     Complex amplitude(int k) const {
         if (k < 0 || k >= Z_) throw std::out_of_range("Qudit: basis index " + std::to_string(k) + " out of range");
@@ -334,7 +340,9 @@ public:
     }
 
 
-    // Husimi Q function on a (theta, phi) grid, for plotting the state on the Bloch sphere:
+    // Husimi Q function on a (theta, phi) grid, such that:
+    //    C sum_{i=0}^{ntheta-1} sin(theta_i) sum_{j=0}^{nphi−2} Q_{i,j} approx 1
+    // where C = (2J+1)pi / (2(ntheta−1)(nphi−1)), and we neglect the last j.
     RealMatrix husimiQ(int nTheta=61, int nPhi=121) const {
         // Check the grid dimension is valid.
         if (nTheta < 2 || nPhi < 2) throw std::invalid_argument("Qudit::husimiQ: the grid needs at least 2 x 2 points");
@@ -357,12 +365,55 @@ public:
                 Q(i, j) = std::norm(overlap);
             }
         }
-        // Check the normalization over the Bloch sphere with:
-        //     1 approx C sum_{i=0}^{ntheta-1} sin(theta_i) sum_{j=0}^{nphi−2} Q_{i,j}
-        // where C = (2J+1)pi / (2(ntheta−1)(nphi−1)), and we neglect the last j.
         return Q;
     }
 
+    // Wigner matrix Dy_ = exp(-i pi/2 S_y): rotation by pi/2 about y, built once in the constructor.
+    //     Dy_(a, k) = <J,m_a| exp(-i pi/2 S_y) |J,m_k>,   m_a = J - a,  m_k = J - k   (real numbers).
+    // Cost O(Z^2), memory 16 Z^2 bytes, accuracy ~1e-15 (Z = 801: 2.5e-15), valid for Z <= 2045.
+    static Matrix wignerDy(int Z) {
+        const int twoJ = Z - 1;
+        const double J = 0.5 * twoJ;
+        // The smallest number used below is 2^-J: it must be a normal double, i.e. J <= 1022.
+        if (twoJ / 2 > 1022) throw std::invalid_argument("Qudit: Z > 2045 is too large for the double-precision Dy");
+        
+        // Edge rows. Their moduli are known in closed form (as for the equatorial CSS):
+        //     D(0, k) = (-1)^k e_k,   D(2J, k) = e_k,   e_k = sqrt(C(2J,k)) / 2^J.
+        // e_k is built as a product, e_k = e_{k-1} sqrt((2J-k+1)/k), from e_0 = 2^-J 
+        // given exactly by std::ldexp(x, n) = x * 2^n. This is the reason for J <= 1022.
+        RealVector e(Z);
+        e(0) = std::ldexp(twoJ % 2 == 1 ? std::sqrt(0.5) : 1.0, -(twoJ / 2));
+        // 2^-J = x * 2^-floor(J), x = sqrt(1/2) for half-integer J, 1 for integer J.
+        for (int k = 1; k <= twoJ / 2; k++) e(k) = e(k - 1) * std::sqrt((twoJ - k + 1) / static_cast<double>(k));
+        for (int k = 0; k <= twoJ / 2; k++) e(twoJ - k) = e(k);      // symmetry e_k = e_{2J-k}
+        // Through logSqrtBinomial, the 1e-16 * lgamma(2J) ~ 1e-13 error of the exponent would become 1e-13 after exp.
+
+        // Inner rows: Dy rotates S_z into S_x, i.e. S_x Dy = Dy S_z, so column k is the eigenvector of S_x
+        // with eigenvalue m_k (the Dicke state |J, m_k>_x). S_x only couples rows a and a+1, through
+        // <J,m_a|S_+|J,m_a - 1> = Cmnus(J, m_a), which gives a three-term recurrence for each column:
+        //     ( Cmnus(J, m_{a-1}) D(a-1,k) + Cmnus(J, m_a) D(a+1,k) ) / 2 = m_k D(a,k).
+        // It is run INWARD from both edges (the stable direction: near the edges each column grows inward),
+        // and the two halves meet in the middle row.
+        RealMatrix D(Z, Z);
+        const int mid = twoJ / 2;                   // rows 0..mid from the top, mid+1..2J from the bottom
+        for (int k = 0; k < Z; k++) {
+            const double m = J - k;
+            D(0, k)    = (k % 2 == 0) ? e(k) : -e(k);
+            D(twoJ, k) = e(k);
+            // From the top:     D(a+1) = ( 2 m D(a) - Cmnus(J, m_{a-1}) D(a-1) ) / Cmnus(J, m_a)
+            for (int a = 0; a < mid; a++) {
+                const double above = (a > 0) ? Cmnus(J, J - a + 1) * D(a - 1, k) : 0.0;
+                D(a + 1, k) = (2 * m * D(a, k) - above) / Cmnus(J, J - a);
+            }
+            // From the bottom:  D(a-1) = ( 2 m D(a) - Cmnus(J, m_a) D(a+1) ) / Cmnus(J, m_{a-1})
+            for (int a = twoJ; a > mid + 1; a--) {
+                const double below = (a < twoJ) ? Cmnus(J, J - a) * D(a + 1, k) : 0.0;
+                D(a - 1, k) = (2 * m * D(a, k) - below) / Cmnus(J, J - a + 1);
+            }
+        }
+        // d^J(pi/2) is real; stored as complex to be used with applyRotation.
+        return D.cast<Complex>();
+    }
 
 
     // ========================================================================
@@ -376,7 +427,7 @@ public:
         if (n == 0.0) throw std::runtime_error("Qudit::normalize: the state is the zero vector");
         // Eigen divides every component by n.
         psi_ /= n;   
-        return *this;
+        return *this;    
     }
 
     // Replace the state with a user-given vector (must have size Z).
@@ -485,6 +536,35 @@ public:
         // Check E before changing anything (evolveDiagonal would check it only after the first rotation).
         if (E.size() != P.rows()) throw std::invalid_argument("Qudit::evolve: different number of eigenvalues and eigenvectors.");
         return applyRotation(P.adjoint()).evolveDiagonal(E, t).applyRotation(P);
+    }
+
+    // One-axis twisting (OAT):  psi -> exp(-i chi S_z^2) psi.
+    // On a coherent state on the equator, it squeezes the orthogonal fluctuations.
+    Qudit& squeezeOAT(double chi) {
+        RealVector m2(Z_);
+        // Diagonal in the S_z basis: amplitude k gets the phase exp(-i chi m_k^2), m_k = J - k.
+        for (int k = 0; k < Z_; k++) m2(k) = spinM(k) * spinM(k);
+        return evolveDiagonal(m2, chi);
+    }
+    
+    // Two-axis counter-twisting (TACT):  psi -> exp(-i chi {S_x, S_y}/2) psi
+    //     exp(-i chi {S_x,S_y}/2) = R exp(-i chi G) R^dagger,   R = exp(-i pi/4 S_z),
+    // and G = (S_+^2 + S_-^2)/4 is a REAL symmetric matrix that only couples k and k+2.
+    Qudit& squeezeTACT(double chi) {
+        const double J = spinJ();
+        // G(k, k+2) = <J,m_k| S_+^2 |J,m_{k+2}> / 4 = Cplus(J, m) Cplus(J, m + 1) / 4,  with m = m_{k+2}.
+        RealMatrix G = RealMatrix::Zero(Z_, Z_);
+        for (int k = 0; k + 2 < Z_; k++) {
+            const double m = spinM(k + 2);
+            G(k, k + 2) = G(k + 2, k) = 0.25 * Cplus(J, m) * Cplus(J, m + 1);
+        }
+        const Eigen::SelfAdjointEigenSolver<RealMatrix> solver(G);
+        // Apply R^dagger...
+        applyPulseZ(-kPi_ / 4);
+        // ... then exp(-i chi G)...
+        evolve(solver.eigenvalues(), solver.eigenvectors().cast<Complex>(), chi);
+        // ... and finally R.
+        return applyPulseZ(kPi_ / 4);
     }
 
 
@@ -691,53 +771,6 @@ private:
         }
         return r;
     }
-
-    // Wigner matrix Dy_ = exp(-i pi/2 S_y): rotation by pi/2 about y, built once in the constructor.
-    //     Dy_(a, k) = <J,m_a| exp(-i pi/2 S_y) |J,m_k>,   m_a = J - a,  m_k = J - k   (real numbers).
-    // Cost O(Z^2), memory 16 Z^2 bytes, accuracy ~1e-15 (Z = 801: 2.5e-15), valid for Z <= 2045.
-    Matrix buildDy() const {
-        const int twoJ = Z_ - 1;
-        const double J = spinJ();
-        // The smallest number used below is 2^-J: it must be a normal double, i.e. J <= 1022.
-        if (twoJ / 2 > 1022) throw std::invalid_argument("Qudit: Z > 2045 is too large for the double-precision Dy");
-        
-        // Edge rows. Their moduli are known in closed form (as for the equatorial CSS):
-        //     D(0, k) = (-1)^k e_k,   D(2J, k) = e_k,   e_k = sqrt(C(2J,k)) / 2^J.
-        // e_k is built as a product, e_k = e_{k-1} sqrt((2J-k+1)/k), from e_0 = 2^-J 
-        // given exactly by std::ldexp(x, n) = x * 2^n. This is the reason for J <= 1022.
-        RealVector e(Z_);
-        e(0) = std::ldexp(twoJ % 2 == 1 ? std::sqrt(0.5) : 1.0, -(twoJ / 2));
-        // 2^-J = x * 2^-floor(J), x = sqrt(1/2) for half-integer J, 1 for integer J.
-        for (int k = 1; k <= twoJ / 2; k++) e(k) = e(k - 1) * std::sqrt((twoJ - k + 1) / static_cast<double>(k));
-        for (int k = 0; k <= twoJ / 2; k++) e(twoJ - k) = e(k);      // symmetry e_k = e_{2J-k}
-        // Through logSqrtBinomial, the 1e-16 * lgamma(2J) ~ 1e-13 error of the exponent would become 1e-13 after exp.
-
-        // Inner rows: Dy rotates S_z into S_x, i.e. S_x Dy = Dy S_z, so column k is the eigenvector of S_x
-        // with eigenvalue m_k (the Dicke state |J, m_k>_x). S_x only couples rows a and a+1, through
-        // <J,m_a|S_+|J,m_a - 1> = Cmnus(J, m_a), which gives a three-term recurrence for each column:
-        //     ( Cmnus(J, m_{a-1}) D(a-1,k) + Cmnus(J, m_a) D(a+1,k) ) / 2 = m_k D(a,k).
-        // It is run INWARD from both edges (the stable direction: near the edges each column grows inward),
-        // and the two halves meet in the middle row.
-        RealMatrix D(Z_, Z_);
-        const int mid = twoJ / 2;                   // rows 0..mid from the top, mid+1..2J from the bottom
-        for (int k = 0; k < Z_; k++) {
-            const double m = spinM(k);
-            D(0, k)    = (k % 2 == 0) ? e(k) : -e(k);
-            D(twoJ, k) = e(k);
-            // From the top:     D(a+1) = ( 2 m D(a) - Cmnus(J, m_{a-1}) D(a-1) ) / Cmnus(J, m_a)
-            for (int a = 0; a < mid; a++) {
-                const double above = (a > 0) ? Cmnus(J, spinM(a - 1)) * D(a - 1, k) : 0.0;
-                D(a + 1, k) = (2 * m * D(a, k) - above) / Cmnus(J, spinM(a));
-            }
-            // From the bottom:  D(a-1) = ( 2 m D(a) - Cmnus(J, m_a) D(a+1) ) / Cmnus(J, m_{a-1})
-            for (int a = twoJ; a > mid + 1; a--) {
-                const double below = (a < twoJ) ? Cmnus(J, spinM(a)) * D(a + 1, k) : 0.0;
-                D(a - 1, k) = (2 * m * D(a, k) - below) / Cmnus(J, spinM(a - 1));
-            }
-        }
-        // d^J(pi/2) is real; stored as complex to be used with applyRotation.
-        return D.cast<Complex>();
-    }
 };
 
-}  // namespace spin
+};  // namespace spin

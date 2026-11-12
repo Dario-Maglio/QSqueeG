@@ -50,13 +50,15 @@ PYBIND11_MODULE(spinlib, m) {
         .def("dim",        &Qudit::dim)
         .def("spinJ",      &Qudit::spinJ)
         .def("spinM",      &Qudit::spinM, py::arg("k"))
-        .def("state",      &Qudit::state)     // returns a NumPy array (copy of the state)
+        .def("state",      &Qudit::state)     // NumPy array (copy of the state)
         .def("norm",       &Qudit::norm)
+        .def("Dy",            &Qudit::Dy)     // NumPy N x N array (a copy)
         .def("amplitude",  &Qudit::amplitude, py::arg("k"))
         .def("overlapCSS", &Qudit::overlapCSS, py::arg("theta"), py::arg("phi"))
         .def("avgSpin",    &Qudit::avgSpin)   // NumPy array: <S_x>, <S_y>, <S_z>
         .def("covSpin",    &Qudit::covSpin)   // NumPy 3 x 3 array: covariances
         .def("husimiQ",    &Qudit::husimiQ, py::arg("nTheta") = 61, py::arg("nPhi") = 121)
+        .def_static("wignerDy", &Qudit::wignerDy, py::arg("N"))    // called spinlib.Qudit.wignerDy(21)
 
         // d.) Modifiers
         .def("normalize",         &Qudit::normalize,         self)
@@ -71,6 +73,8 @@ PYBIND11_MODULE(spinlib, m) {
         .def("applyPulseYPiHalf", &Qudit::applyPulseYPiHalf, self)
         .def("evolveDiagonal",    &Qudit::evolveDiagonal,    py::arg("energies"), py::arg("t"), self)
         .def("evolve",            &Qudit::evolve,            py::arg("E"), py::arg("P"), py::arg("t"), self)
+        .def("squeezeOAT",        &Qudit::squeezeOAT,        py::arg("chi"), self)
+        .def("squeezeTACT",       &Qudit::squeezeTACT,       py::arg("chi"), self)
 
         // e.) Input / output
         // printSpin writes to C++'s std::cout, which Jupyter does not show: redirect it to Python.
