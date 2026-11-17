@@ -55,6 +55,7 @@ PYBIND11_MODULE(spinlib, m) {
         .def("Dy",            &Qudit::Dy)     // NumPy N x N array (a copy)
         .def("amplitude",  &Qudit::amplitude, py::arg("k"))
         .def("overlapCSS", &Qudit::overlapCSS, py::arg("theta"), py::arg("phi"))
+        .def_static("cssModuli", &Qudit::cssModuli, py::arg("N"), py::arg("theta"))
         .def("avgSpin",    &Qudit::avgSpin)   // NumPy array: <S_x>, <S_y>, <S_z>
         .def("covSpin",    &Qudit::covSpin)   // NumPy 3 x 3 array: covariances
         .def("husimiQ",    &Qudit::husimiQ, py::arg("nTheta") = 61, py::arg("nPhi") = 121)
