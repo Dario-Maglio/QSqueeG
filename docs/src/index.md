@@ -1,3 +1,0 @@
-# QSqueeG
-
-Documentation for QSqueeG.
