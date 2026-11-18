@@ -1,90 +1,166 @@
 # QSqueeG
 
+[![Open notebook_cpy_playground in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Dario-Maglio/QSqueeG/blob/main/examples/notebook_cpy_playground.ipynb)
+&nbsp;`notebook_cpy_playground`: the `spin::Qudit` library from Python
+
+[![Open notebook_cpy_QSqueezeG in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Dario-Maglio/QSqueeG/blob/main/notebook_cpy_QSqueezeG.ipynb)
+&nbsp;`notebook_cpy_QSqueezeG`: atom interferometer with internal clocks in gravity
+
 Welcome to the **Quantum Squeezing for Gravity** project!
 
-This repository collects numerical tools to simulate a single collective spin $J$ (a *qudit* of dimension
-$N = 2J+1$): state preparation, pulses, time evolution under spin Hamiltonians, spin moments and squeezing,
-and visualisation on the Bloch sphere. The same physics is available in two independent implementations:
+## Goal
 
-* **C++** (`src_cpp/`): the header-only class `spin::Qudit`, built on Eigen, usable from C++ or from Python
-  through the `spinlib` module;
-* **Julia** (`src_jul/`): the function library `SpinLibrary.jl`, working with plain vectors and matrices.
+The project studies how gravity enters the quantum state of an ensemble of atomic clocks, and what can be
+learnt about it with collective spin techniques (pulses, interferometry, squeezing). Its central piece is the
+notebook **`notebook_cpy_QSqueezeG.ipynb`**, which simulates exactly a Mach–Zehnder interferometer for $N$
+bosonic two-level atoms whose internal states, ground $g$ and excited $e$, form an optical clock (⁸⁷Sr):
+
+1. all the atoms enter the same port, in $g$;
+2. a first beam splitter puts them in a superposition of two arms, held at heights $z_d$ and $z_u$ by Bloch
+   oscillations in optical lattices;
+3. within each arm, a Ramsey sequence ($\pi/2$ pulse, free evolution for a time $T$, $\pi/2$ pulse) lets the
+   clocks tick at the redshifted frequency of their height;
+4. a second beam splitter recombines the arms, and the atoms are counted by output port and internal state.
+
+The notebook is written in Python on top of the C++ spin library `spin::Qudit` (described below), which it
+imports as the module `spinlib`; the library and its tests are presented in `examples/notebook_cpy_playground.ipynb`.
+
+> **Work in progress.** A parallel implementation in Julia (`src_jul/SpinLibrary.jl` and the `notebook_jul_*`
+> notebooks) is also in progress, and does not yet cover the interferometer of `notebook_cpy_QSqueezeG.ipynb`.
+
+The interferometer acts on two degrees of freedom at once, and each one shows its own fringe:
+
+| | observable | fringe | requires |
+|---|---|---|---|
+| internal (clock) | $P(N_g)$, atoms in $g$ | Ramsey fringe, at the detuning $\bar\omega$ of the clocks from the laser | superposition of $g$ and $e$ |
+| external (path) | $P(N^d)$, atoms leaving the down port | gravitational fringe, at $\Delta\Omega = m g\,\Delta z/\hbar$ | superposition of the two heights |
+
+Both fringes are modulated by the same envelope, the **visibility**
+$\mathcal V(T) = \cos(\Delta\omega T/2)$, where $\Delta\omega = \omega_0 g\,\Delta z/c^2$ is the gravitational
+redshift between the arms: the internal energy gravitates (mass–energy equivalence), so the clocks at the
+two heights tick at different rates. The notebook shows that
+
+* the envelope alone does not certify a superposition: in $P(N_g)$ it also appears for atoms placed at random
+  at either height, in $P(N^d)$ for clocks in $g$ or $e$ at random;
+* each observable must therefore be complemented by the other degree of freedom; the port-resolved ground
+  population $D_g$ combines the two, vanishing without path coherence and losing its Ramsey modulation without
+  internal coherence;
+* with the physical values (⁸⁷Sr, $\Delta z = 10\ \mu$m) the three time scales are very far apart: the
+  gravitational fringe has a period of $47\ \mu$s, the Ramsey fringe of $4$ s, and the visibility vanishes
+  only after about $12$ days.
+
+The same simulation reproduces the predictions of two reference works, translated to the notation of the
+notebook and checked against their equations:
+
+* M. Zych *et al.*, Nat. Commun. **2**, 505 (2011): loss of interferometric visibility due to proper time
+  (Fig. 2, Eq. 12);
+* Paczos, Foo & Zych, Quantum (2025), arXiv:2406.19037: Ramsey spectroscopy of clocks trapped at two heights
+  (Fig. 3, Eqs. 1 and 5), with the comparison between a superposition and a mixture of heights.
+
+### How the notebook works
+
+The state of the $N$ atoms is never stored in the full Fock space of the four modes (two arms × two internal
+states). Each step uses one collective spin, a qudit of the library `spin::Qudit` described below:
+
+| Section | What it does |
+|---|---|
+| 1. Setup | imports `spinlib`, sets the physical parameters (⁸⁷Sr, heights, clock laser, Bloch velocity) and prints the relevant scales |
+| 2. First beam splitter | the path qudit: $N^d$ atoms in the down arm, amplitudes $B_{N^d}$ (binomial) |
+| 3. Ramsey sequence within each arm | one internal qudit per arm, amplitudes $C^{N^I}_{N^I_g}$ after the pulses and the free evolution |
+| 4. Second beam splitter | regrouping into sectors of fixed $N_g$ (conserved by the beam splitter), each a matrix $\Psi_{N_g}$; the second beam splitter is $\Psi'_{N_g} = D_{N_g}\Psi_{N_g}D_{N-N_g}^T$ with the Wigner matrices $D_n = e^{-i\pi J_y/2}$ |
+| 5. Scan in time, Zych and Paczos models | exact single-atom results; the whole sequence as a function of $T$; maps of the fringes and of the visibility; the two reference models; a laser-frequency scan |
+
+Every simulated distribution is checked against the exact binomial laws, which hold when the atoms evolve
+independently (no twisting). The cost of one run is about $N^3$ operations, so $N \sim 100$ takes a fraction
+of a second.
 
 ## Repository layout
 
 ```
 QSqueeG/
+├── notebook_cpy_QSqueezeG.ipynb        # main notebook: atom interferometer with internal clocks in gravity
+├── notebook_jul_QSqueezeG.ipynb        # working notebook (Julia): analytical calculations for 2 atoms, squeezing
 ├── src_cpp/
-│   ├── qudit.hpp            # class spin::Qudit (double precision)
-│   ├── quditType.hpp        # same class with the alias spin::Real = long double (extended precision)
-│   └── spin_bindings.cpp    # pybind11 bindings -> Python module "spinlib"
+│   ├── qudit.hpp                       # header-only class spin::Qudit
+│   └── spin_bindings.cpp               # pybind11 bindings -> Python module "spinlib"
 ├── src_jul/
-│   └── SpinLibrary.jl       # states, spin operators, tensor products, diagonalisation and evolution
+│   └── SpinLibrary.jl                  # states, spin operators, tensor products, diagonalisation and evolution
 ├── test/
-│   ├── test_qudit.cpp       # checks of spin::Qudit against exact results
-│   └── test_eigen.cpp       # minimal check that Eigen is installed and works
+│   ├── test_qudit.cpp                  # checks of spin::Qudit against exact results
+│   └── test_eigen.cpp                  # minimal check that Eigen is installed and works
 ├── examples/
-│   ├── notebook_cpy_playground.ipynb   # spin::Qudit from Python: tests, Bloch sphere, dynamics
+│   ├── notebook_cpy_playground.ipynb   # spin::Qudit from Python: build, tests, Bloch sphere, dynamics
 │   ├── notebook_jul_playground.ipynb   # SpinLibrary.jl: tests, Bloch sphere, dynamics
-│   └── notebook_jul_spinDynamics.ipynb # first example: one-axis twisting in Julia
-├── notebook_jul_QSqueezeG.ipynb        # working notebook: analytical calculations for 2 atoms, squeezing
+│   └── notebook_jul_spinDynamics.ipynb # one-axis twisting in Julia
 ├── docs/
 └── Project.toml
 ```
 
-## Conventions
+## Running the notebooks
 
-Both libraries work in the eigenbasis of $S_z$, ordered from the **highest** to the **lowest** projection $m$,
-so the first basis vector is the coherent state along $+z$, $|J, J\rangle = (1, 0, \dots, 0)$:
+**Locally.** Run section 1 of `examples/notebook_cpy_playground.ipynb` once: it compiles the C++ library into
+the Python module `spinlib` inside `src_cpp/`. `notebook_cpy_QSqueezeG.ipynb` then imports it from there.
+Rebuild after any change to `qudit.hpp` or `spin_bindings.cpp`, and on each new machine or Python version.
 
-| | index | projection |
-|---|---|---|
-| C++ / Python (`spin::Qudit`, `spinlib`) | $k = 0, \dots, N-1$ | $m = J - k$ |
-| Julia (`SpinLibrary.jl`) | $k = 1, \dots, 2S+1$ | $m = S + 1 - k$ |
+**In Colab.** The badges open a single notebook, without the rest of the repository, and each notebook runs on
+its own machine. Before running it, add a first cell that clones the repository and builds `spinlib`:
 
-Times are in units with $\hbar = 1$: a state evolves as $|\psi(t)\rangle = e^{-iHt}|\psi(0)\rangle$, and a
-pulse of angle $\alpha$ about the axis $a$ is $e^{-i\alpha S_a}$.
+```python
+!apt-get -qq update > /dev/null && apt-get -qq install -y libeigen3-dev > /dev/null
+%pip install -q pybind11
+!git clone -q https://github.com/Dario-Maglio/QSqueeG
+%cd QSqueeG/src_cpp
+!c++ -O2 -shared -std=c++17 -fPIC $(python3 -m pybind11 --includes) -isystem /usr/include/eigen3 \
+     spin_bindings.cpp -o spinlib$(python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
+%cd ..                       # for the playground: %cd examples instead
+```
+
+| Notebook | Requirements |
+|---|---|
+| `notebook_cpy_playground.ipynb`, `notebook_cpy_QSqueezeG.ipynb` | Python 3 with NumPy, Matplotlib, Plotly, pybind11; Eigen; a C++17 compiler |
+| `notebook_jul_playground.ipynb` | Julia ≥ 1.10 with IJulia; installs CairoMakie, LaTeXStrings and JLD2 if missing |
 
 ---
 
-## C++ library: `spin::Qudit`
+## The C++ library `spin::Qudit`
 
-`spin::Qudit` stores the pure state of one spin as $N$ complex amplitudes. It is header-only: just
-`#include "qudit.hpp"`. The only dependency is [Eigen 3](https://eigen.tuxfamily.org) (also header-only).
+`spin::Qudit` stores the pure state of one spin $J$ as $Z = 2J+1$ complex amplitudes, in the eigenbasis of
+$J_z$ ordered from the highest to the lowest projection: index $k = 0, \dots, Z-1$ is $|J, m = J - k\rangle$.
+It is header-only (`#include "qudit.hpp"`); the only dependency is [Eigen 3](https://eigen.tuxfamily.org).
+Times are in units with $\hbar = 1$, and a pulse of angle $\alpha$ about the axis $a$ is $e^{-i\alpha J_a}$.
 
 | Group | Methods |
 |---|---|
-| Construction | `Qudit(N, "CSS+Z")`: the label is any of `CSS±X`, `CSS±Y`, `CSS±Z` |
-| State preparation | `prepareNamed(label)`, `prepareCSS(theta, phi)`, `prepareEquatorialCSS(q)`, `prepareDickeZ(k)`, `prepareDickeX(k)`, `prepareDickeY(k)` |
-| Pulses | `applyPulseZ(phi)`, `applyPulseXPi()`, `applyPulseYPi()`, `applyPulseXPiHalf()`, `applyPulseYPiHalf()`, `applyRotation(U)` |
-| Evolution | `evolveDiagonal(E, t)` for a Hamiltonian diagonal in the $S_z$ basis; `evolve(E, P, t)` for $H = P\,\mathrm{diag}(E)\,P^\dagger$ |
-| Spin moments | `avgSx/Sy/Sz()`, `avgSx2/Sy2/Sz2()`, `avgSplus()`, `avgSminus()`, `avgSplus2()`, `varSx/Sy/Sz()` |
-| State access | `dim()`, `spinJ()`, `spinM(k)`, `state()`, `amplitude(k)`, `norm()`, `normalize()`, `setState(psi)` |
+| Construction | `Qudit(Z, "CSS+Z")`: the label is any of `CSS±X`, `CSS±Y`, `CSS±Z` |
+| State preparation | `prepareNamed(label)`, `prepareCSS(theta, phi)`, `prepareEquatorialCSS(q)`, `prepareDickeZ(k)`, `prepareDickeX(k)`, `prepareDickeY(k)`, `prepareReference()` |
+| Pulses | `applyPulseX(phi)`, `applyPulseY(phi)`, `applyPulseZ(phi)`, exact `applyPulseXPi()`, `applyPulseYPi()`, `applyPulseXPiHalf()`, `applyPulseYPiHalf()`, `applyRotation(U)` |
+| Evolution | `evolveDiagonal(E, t)` for $H$ diagonal in $J_z$; `evolve(E, P, t)` for $H = P\,\mathrm{diag}(E)\,P^\dagger$; `squeezeOAT(chi)` $= e^{-i\chi J_z^2}$; `squeezeTACT(chi)` $= e^{-i\chi\{J_x,J_y\}/2}$ |
+| Spin moments | `avgSpin()`: mean spin $(\langle J_x\rangle, \langle J_y\rangle, \langle J_z\rangle)$; `covSpin()`: $3\times3$ covariance matrix, variances on the diagonal |
+| State access | `dim()`, `spinJ()`, `spinM(k)`, `state()`, `amplitude(k)`, `norm()`, `normalize()`, `setState(psi)`, `Dy()` |
 | Bloch sphere | `overlapCSS(theta, phi)`, `husimiQ(nTheta, nPhi)`: Husimi function $Q = \lvert\langle\theta,\varphi\vert\psi\rangle\rvert^2$ on a grid |
+| Static | `wignerDy(Z)`: the matrix $e^{-i\pi J_y/2}$ for any dimension; `cssModuli(Z, theta)`: moduli of a coherent state, whose squares are the binomial law |
 | Output | `printSpin(name)`, `save(fileName)`, `load(fileName)` |
 
-State preparations, pulses and evolutions return a reference to the qudit, so they can be chained:
+Preparations, pulses and evolutions return a reference to the qudit, so they can be chained:
 
 ```cpp
 #include "qudit.hpp"
 
 int main() {
-    spin::Qudit q(41, "CSS+Z");                    // N = 41, i.e. J = 20
+    spin::Qudit q(41, "CSS+Z");                    // Z = 41, i.e. J = 20
     q.applyPulseYPiHalf().applyPulseZ(0.3);        // to the equator, then precession by 0.3 rad
-    q.printSpin("after the pulses");               // norm, <S> and variances
+    q.printSpin("after the pulses");               // norm, <J> and variances
 }
 ```
 
-Numerical notes:
-* π and π/2 pulses are computed exactly (vector reversal, Wigner matrix $d^J(\pi/2)$ from a stable
-  three-term recurrence), not by diagonalisation;
-* variances are computed as $\|(S_a - \langle S_a\rangle)\psi\|^2$, which avoids cancellations and is never negative;
-* `quditType.hpp` is the same class with every real number of type `spin::Real = long double`
-  (about 19 significant digits on x86 Linux instead of 16, at the price of slower products).
+Numerical notes: $\pi$ and $\pi/2$ pulses are exact (vector reversal, and the Wigner matrix $d^J(\pi/2)$ from a
+stable three-term recurrence, accurate to $\sim 10^{-15}$ and valid up to $Z = 2045$); the covariance matrix is computed
+from $(J_a - \langle J_a\rangle)\psi$, which avoids cancellations; binomial coefficients go through
+`lgamma`, so coherent states do not overflow for large $J$.
 
 ### Build and test
 
-Install Eigen (e.g. `sudo apt install libeigen3-dev` on Debian/Ubuntu, `brew install eigen` on macOS), then:
+Install Eigen (`sudo apt install libeigen3-dev` on Debian/Ubuntu, `brew install eigen` on macOS), then:
 
 ```bash
 cd test
@@ -92,40 +168,23 @@ g++ -std=c++17 -Wall -Wextra -O2 -isystem /usr/include/eigen3 test_qudit.cpp -o 
 ./qudit_test.out
 ```
 
-`-isystem` (instead of `-I`) hides the harmless warnings coming from Eigen's own headers.
-The test prints each quantity next to its exact value: coherent and Dicke states, pulse sequences,
-one-axis twisting, non-diagonal evolution and save/load.
-
 ### From Python: the `spinlib` module
 
-`spin_bindings.cpp` exposes `spin::Qudit` to Python with [pybind11](https://pybind11.readthedocs.io);
-Eigen vectors and matrices become NumPy arrays. Build the module once (needs `pip install pybind11` and the
-Python development headers, e.g. `python3-dev`):
-
-```bash
-cd src_cpp
-c++ -O2 -shared -std=c++17 -fPIC $(python3 -m pybind11 --includes) -isystem /usr/include/eigen3 \
-    spin_bindings.cpp -o spinlib$(python3-config --extension-suffix)
-```
-
-and use it from the same folder (or after adding `src_cpp` to `sys.path`):
+`spin_bindings.cpp` exposes `spin::Qudit` to Python with [pybind11](https://pybind11.readthedocs.io); Eigen
+vectors and matrices become NumPy arrays. The build command is the one in the Colab cell above, run inside
+`src_cpp/`. Then:
 
 ```python
 import spinlib
 q = spinlib.Qudit(41, "CSS+X")
-print(q.avgSx(), q.varSy())                  # 20.0, 10.0
+print(q.avgSpin()[0], q.covSpin()[1, 1])     # <J_x> = 20.0, Var(J_y) = 10.0
 Q = q.husimiQ()                              # 61 x 121 NumPy array
 ```
 
-The compiled file is specific to one Python version and platform: rebuild it on each machine.
-The notebook `examples/notebook_cpy_playground.ipynb` does the build for you (section 1).
-
----
-
-## Julia library: `SpinLibrary.jl`
+## The Julia library `SpinLibrary.jl`
 
 A collection of plain functions, loaded with `include("src_jul/SpinLibrary.jl")`; it only needs the standard
-library `LinearAlgebra`.
+library `LinearAlgebra`. Indices run over $k = 1, \dots, 2S+1$, with $m = S + 1 - k$.
 
 | Group | Functions |
 |---|---|
@@ -133,43 +192,6 @@ library `LinearAlgebra`.
 | Spin operators | `Sx(S)`, `Sy(S)`, `Sz(S)`, `Splus(S)`, `Sminus(S)`, `identite(n)` |
 | Several spins | `prod_tens_vec`, `prod_tens_op` (and the complex versions `...C`), `ham_part_lin_diff`, `ham_part_quad_diff` |
 | Evolution | `vp, P, Pm = diagonalisation(H)`, then `evolution(vp, P, Pm, psi, t)`; `evol_diag(E, psi, t)` for a diagonal $H$ |
-
-```julia
-using LinearAlgebra
-include("src_jul/SpinLibrary.jl")
-
-S = 10
-vp, P, Pm = diagonalisation(Sz(S) * Sz(S))           # one-axis twisting H = Sz^2
-psi = evolution(vp, P, Pm, init_cssX(S), 0.3)        # state at t = 0.3
-println(real(dot(psi, Sx(S) * psi)))                 # <Sx> = S cos(t)^(2S-1)
-```
-
----
-
-## Example notebooks
-
-The two playground notebooks have the same structure, so the C++ and Julia implementations can be
-compared side by side:
-
-1. **Setup**: packages and library (for Python, also the build of `spinlib`);
-2. **Tests**: coherent and Dicke states, pulse sequences, diagonal and non-diagonal evolution, save/load,
-   each compared with its exact value;
-3. **Bloch sphere**: the Husimi function $Q(\theta,\varphi)$ drawn on the sphere, with the mean spin
-   (interactive Plotly figures in Python, CairoMakie in Julia);
-4. **Dynamics**: curves of the spin moments together with the state on the sphere for
-   * Rabi rotation $H = \Omega S_x$,
-   * one-axis twisting $H = S_z^2$, from the coherent state to squeezing and cat states,
-   * twisting and turning $H = \chi S_z^2 + \Omega S_x$, with the Wineland squeezing parameter
-     $\xi^2 = 2J\,\mathrm{Var}_{\min}/\langle S_x\rangle^2$,
-   * Ramsey interferometry and its fringes.
-
-The notebooks are meant to be run from the `examples/` folder: they find the libraries at `../src_cpp` and
-`../src_jul`.
-
-| Notebook | Requirements |
-|---|---|
-| `notebook_cpy_playground.ipynb` | Python 3 with NumPy, Matplotlib, Plotly, pybind11; Eigen; a C++17 compiler |
-| `notebook_jul_playground.ipynb` | Julia ≥ 1.10 with IJulia; installs CairoMakie, LaTeXStrings and JLD2 if missing |
 
 ## Authors
 
