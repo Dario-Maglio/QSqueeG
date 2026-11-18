@@ -1,26 +1,32 @@
 # QSqueeG
 
+Welcome to the **Quantum Squeezing for Gravity** project!
+
 [![Open notebook_cpy_playground in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Dario-Maglio/QSqueeG/blob/main/examples/notebook_cpy_playground.ipynb)
 &nbsp;`notebook_cpy_playground`: the `spin::Qudit` library from Python
 
 [![Open notebook_cpy_QSqueezeG in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Dario-Maglio/QSqueeG/blob/main/notebook_cpy_QSqueezeG.ipynb)
 &nbsp;`notebook_cpy_QSqueezeG`: atom interferometer with internal clocks in gravity
 
-Welcome to the **Quantum Squeezing for Gravity** project!
-
 ## Goal
 
-The project studies how gravity enters the quantum state of an ensemble of atomic clocks, and what can be
-learnt about it with collective spin techniques (pulses, interferometry, squeezing). Its central piece is the
+The project studies the interplay between the mass-energy equivalence and the superposition principle with
+atomic ensembles and collective spin techniques (pulses, interferometry, squeezing). Its central piece is the
 notebook **`notebook_cpy_QSqueezeG.ipynb`**, which simulates exactly a Mach–Zehnder interferometer for $N$
 bosonic two-level atoms whose internal states, ground $g$ and excited $e$, form an optical clock (⁸⁷Sr):
 
 1. all the atoms enter the same port, in $g$;
-2. a first beam splitter puts them in a superposition of two arms, held at heights $z_d$ and $z_u$ by Bloch
-   oscillations in optical lattices;
-3. within each arm, a Ramsey sequence ($\pi/2$ pulse, free evolution for a time $T$, $\pi/2$ pulse) lets the
-   clocks tick at the redshifted frequency of their height;
-4. a second beam splitter recombines the arms, and the atoms are counted by output port and internal state.
+2. a first beam splitter puts them in a superposition of two arms, held at heights $z_d$ and $z_u$;
+3. within each arm, the clocks undergo a Ramsey sequence: $\pi/2$ pulse, free evolution, $\pi/2$ pulse;
+4. a second beam splitter recombines the arms, and the atoms are counted.
+
+The same simulation reproduces the predictions of two reference works, translated to the notation of the
+notebook and checked against their equations:
+
+* Zych *et al.*, Nat. Commun. **2**, 505 (2011): loss of interferometric visibility due to proper time
+  (Fig. 2, Eq. 12);
+* Paczos, Foo & Zych, Quantum (2025), arXiv:2406.19037: Ramsey spectroscopy of clocks trapped at two heights
+  (Fig. 3, Eqs. 1 and 5), with the comparison between a superposition and a mixture of heights.
 
 The notebook is written in Python on top of the C++ spin library `spin::Qudit` (described below), which it
 imports as the module `spinlib`; the library and its tests are presented in `examples/notebook_cpy_playground.ipynb`.
@@ -49,30 +55,7 @@ two heights tick at different rates. The notebook shows that
   gravitational fringe has a period of $47\ \mu$s, the Ramsey fringe of $4$ s, and the visibility vanishes
   only after about $12$ days.
 
-The same simulation reproduces the predictions of two reference works, translated to the notation of the
-notebook and checked against their equations:
 
-* M. Zych *et al.*, Nat. Commun. **2**, 505 (2011): loss of interferometric visibility due to proper time
-  (Fig. 2, Eq. 12);
-* Paczos, Foo & Zych, Quantum (2025), arXiv:2406.19037: Ramsey spectroscopy of clocks trapped at two heights
-  (Fig. 3, Eqs. 1 and 5), with the comparison between a superposition and a mixture of heights.
-
-### How the notebook works
-
-The state of the $N$ atoms is never stored in the full Fock space of the four modes (two arms × two internal
-states). Each step uses one collective spin, a qudit of the library `spin::Qudit` described below:
-
-| Section | What it does |
-|---|---|
-| 1. Setup | imports `spinlib`, sets the physical parameters (⁸⁷Sr, heights, clock laser, Bloch velocity) and prints the relevant scales |
-| 2. First beam splitter | the path qudit: $N^d$ atoms in the down arm, amplitudes $B_{N^d}$ (binomial) |
-| 3. Ramsey sequence within each arm | one internal qudit per arm, amplitudes $C^{N^I}_{N^I_g}$ after the pulses and the free evolution |
-| 4. Second beam splitter | regrouping into sectors of fixed $N_g$ (conserved by the beam splitter), each a matrix $\Psi_{N_g}$; the second beam splitter is $\Psi'_{N_g} = D_{N_g}\Psi_{N_g}D_{N-N_g}^T$ with the Wigner matrices $D_n = e^{-i\pi J_y/2}$ |
-| 5. Scan in time, Zych and Paczos models | exact single-atom results; the whole sequence as a function of $T$; maps of the fringes and of the visibility; the two reference models; a laser-frequency scan |
-
-Every simulated distribution is checked against the exact binomial laws, which hold when the atoms evolve
-independently (no twisting). The cost of one run is about $N^3$ operations, so $N \sim 100$ takes a fraction
-of a second.
 
 ## Repository layout
 
@@ -92,40 +75,14 @@ QSqueeG/
 │   ├── notebook_cpy_playground.ipynb   # spin::Qudit from Python: build, tests, Bloch sphere, dynamics
 │   ├── notebook_jul_playground.ipynb   # SpinLibrary.jl: tests, Bloch sphere, dynamics
 │   └── notebook_jul_spinDynamics.ipynb # one-axis twisting in Julia
-├── docs/
 └── Project.toml
 ```
 
-## Running the notebooks
-
-**Locally.** Run section 1 of `examples/notebook_cpy_playground.ipynb` once: it compiles the C++ library into
-the Python module `spinlib` inside `src_cpp/`. `notebook_cpy_QSqueezeG.ipynb` then imports it from there.
-Rebuild after any change to `qudit.hpp` or `spin_bindings.cpp`, and on each new machine or Python version.
-
-**In Colab.** The badges open a single notebook, without the rest of the repository, and each notebook runs on
-its own machine. Before running it, add a first cell that clones the repository and builds `spinlib`:
-
-```python
-!apt-get -qq update > /dev/null && apt-get -qq install -y libeigen3-dev > /dev/null
-%pip install -q pybind11
-!git clone -q https://github.com/Dario-Maglio/QSqueeG
-%cd QSqueeG/src_cpp
-!c++ -O2 -shared -std=c++17 -fPIC $(python3 -m pybind11 --includes) -isystem /usr/include/eigen3 \
-     spin_bindings.cpp -o spinlib$(python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
-%cd ..                       # for the playground: %cd examples instead
-```
-
-| Notebook | Requirements |
-|---|---|
-| `notebook_cpy_playground.ipynb`, `notebook_cpy_QSqueezeG.ipynb` | Python 3 with NumPy, Matplotlib, Plotly, pybind11; Eigen; a C++17 compiler |
-| `notebook_jul_playground.ipynb` | Julia ≥ 1.10 with IJulia; installs CairoMakie, LaTeXStrings and JLD2 if missing |
-
----
 
 ## The C++ library `spin::Qudit`
 
-`spin::Qudit` stores the pure state of one spin $J$ as $Z = 2J+1$ complex amplitudes, in the eigenbasis of
-$J_z$ ordered from the highest to the lowest projection: index $k = 0, \dots, Z-1$ is $|J, m = J - k\rangle$.
+The class `spin::Qudit` stores the pure state of one spin $J$ as $Z = 2J+1$ complex amplitudes, in the eigenbasis 
+of $J_z$ ordered from the highest to the lowest projection: index $k = 0, \dots, Z-1$ is $|J, m = J - k\rangle$.
 It is header-only (`#include "qudit.hpp"`); the only dependency is [Eigen 3](https://eigen.tuxfamily.org).
 Times are in units with $\hbar = 1$, and a pulse of angle $\alpha$ about the axis $a$ is $e^{-i\alpha J_a}$.
 
