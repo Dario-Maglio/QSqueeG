@@ -105,6 +105,10 @@ using Matrix3 = Eigen::Matrix3d;
 //        covSpin()                        3 x 3 covariance matrix, variances on the diagonal
 //        husimiQ(nTheta=61, nPhi=121)     Husimi Q function as a nTheta x nPhi matrix
 //        wignerDy(Z)   [static]           the same matrix for any dimension Z, built from scratch
+//        spinMatrix(Z, axis) [static]     J_x, J_y or J_z (axis = 1, 2, 3) as a Z x Z matrix (tridiagonal)
+//        quadraticObservable(Z, a, b, c) [static]
+//                                         sum_i a_i J_i + (b_x {J_y,J_z} + b_y {J_z,J_x} + b_z {J_x,J_y})/2
+//                                         + sum_i c_i J_i^2 as a Z x Z matrix (pentadiagonal), O(Z)
 //
 //  d.) Modifiers  (change the state, return *this for chaining)
 //        normalize()                      rescale to unit norm
@@ -437,6 +441,52 @@ public:
         }
         // d^J(pi/2) is real; stored as complex to be used with applyRotation.
         return D.cast<Complex>();
+    }
+
+    // Spin component J_a (axis = 1, 2, 3 for x, y, z) as a Z x Z matrix in the basis |J, J-k> (tridiagonal):
+    //     J_x = (J_+ + J_-)/2,   J_y = (J_+ - J_-)/(2i),   J_z diagonal with entries m = J - k,
+    // where J_+ takes index k to k - 1 with <J,m+1|J_+|J,m> = Cplus(J, m): element (k-1, k).
+    static Matrix spinMatrix(int Z, int axis) {
+        if (Z < 1) throw std::invalid_argument("Qudit::spinMatrix: invalid dimension " + std::to_string(Z) + ".");
+        if (axis < 1 || axis > 3) throw std::invalid_argument("Qudit::spinMatrix: axis must be 1, 2 or 3");
+        const double J = 0.5 * (Z - 1);
+        Matrix M = Matrix::Zero(Z, Z);
+        for (int k = 0; k < Z; k++) {
+            // J_z: diagonal.
+            if (axis == 3) { M(k, k) = J - k; continue; }
+            if (k == 0) continue;
+            // J_x and J_y: the J_+ part above the diagonal...
+            const double c = 0.5 * Cplus(J, J - k);
+            M(k - 1, k) = (axis == 1) ? Complex(c, 0.0) : Complex(0.0, -c);
+            // ... and the J_- part below it (Hermitian matrix).
+            M(k, k - 1) = std::conj(M(k - 1, k));
+        }
+        return M;
+    }
+
+    // Quadratic observable (Hermitian for real coefficients), with (i, j, k) cyclic in the b term:
+    //     O = sum_i a_i J_i + (b_x {J_y,J_z} + b_y {J_z,J_x} + b_z {J_x,J_y})/2 + sum_i c_i J_i^2 .
+    // It is complete: every Hermitian polynomial of degree <= 2 in the J_i (up to the constant J(J+1) = sum_i J_i^2).
+    // In the basis |J, m>, m = J - k, it is pentadiagonal. With C = Cplus(J, m) = <m+1|J_+|m>:
+    //     <m|O|m>   = a_z m + c_z m^2 + (c_x + c_y)(J(J+1) - m^2)/2
+    //     <m+1|O|m> = C/2 [(a_x - i a_y) + (m + 1/2)(b_y - i b_x)]
+    //     <m+2|O|m> = C Cplus(J, m+1)/4 [(c_x - c_y) - i b_z]
+    // and the lower bands are the complex conjugates. Cost O(Z), no matrix products.
+    static Matrix quadraticObservable(int Z, const Vector3& a, const Vector3& b, const Vector3& c) {
+        if (Z < 1) throw std::invalid_argument("Qudit::quadraticObservable: invalid dimension " + std::to_string(Z) + ".");
+        const double J = 0.5 * (Z - 1);
+        Matrix O = Matrix::Zero(Z, Z);
+        for (int k = 0; k < Z; k++) {
+            const double m = J - k;
+            // Diagonal: J_z, J_z^2 and the diagonal part (J(J+1) - m^2)/2 of both J_x^2 and J_y^2.
+            O(k, k) = a(2) * m + c(2) * m * m + 0.5 * (c(0) + c(1)) * (J * (J + 1) - m * m);
+            // First band: J_x, J_y and {J_z, J_+}|m> = (2m + 1) C |m+1>.
+            if (k >= 1) O(k - 1, k) = 0.5 * Cplus(J, m) * Complex(a(0) + (m + 0.5) * b(1), -a(1) - (m + 0.5) * b(0));
+            // Second band: J_+^2/4 from J_x^2 - J_y^2, and {J_x,J_y}/2 = (J_+^2 - J_-^2)/(4i).
+            if (k >= 2) O(k - 2, k) = 0.25 * Cplus(J, m) * Cplus(J, m + 1) * Complex(c(0) - c(1), -b(2));
+        }
+        // Fill the lower bands with the complex conjugates of the upper ones.
+        return O.selfadjointView<Eigen::Upper>();
     }
 
 

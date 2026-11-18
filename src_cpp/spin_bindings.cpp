@@ -60,7 +60,9 @@ PYBIND11_MODULE(spinlib, m) {
         .def("covSpin",    &Qudit::covSpin)   // NumPy 3 x 3 array: covariances
         .def("husimiQ",    &Qudit::husimiQ, py::arg("nTheta") = 61, py::arg("nPhi") = 121)
         .def_static("wignerDy", &Qudit::wignerDy, py::arg("N"))    // called spinlib.Qudit.wignerDy(21)
-
+        .def_static("spinMatrix",          &Qudit::spinMatrix,          py::arg("Z"), py::arg("axis"))
+        .def_static("quadraticObservable", &Qudit::quadraticObservable, py::arg("Z"), py::arg("a"), py::arg("b"), py::arg("c"))
+        
         // d.) Modifiers
         .def("normalize",         &Qudit::normalize,         self)
         .def("setState",          &Qudit::setState,          py::arg("amplitudes"), py::arg("normalizeIt") = true, self)
